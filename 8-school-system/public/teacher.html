@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HaloSchool — Teacher</title>
+<link rel="stylesheet" href="app.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#171410">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="HaloSchool">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Halo<span>School</span> 🎓</div>
+  <span class="who" id="who"></span>
+  <div class="spacer"></div>
+  <button class="btn ghost sm" style="color:#fdf6e6;border-color:#4a443a" onclick="logout()">Sign out</button>
+</header>
+
+<div class="wrap" id="app" class="hidden">
+  <div class="tabs">
+    <div class="tab on" data-t="att" onclick="go('att')">✅ Attendance</div>
+    <div class="tab" data-t="marks" onclick="go('marks')">📝 Marks</div>
+  </div>
+  <div id="view"></div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script>
+const token=localStorage.getItem('school_token');
+const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+const api=(p,o={})=>fetch(p,{...o,headers:{...H,...(o.headers||{})}}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'error');return d;});
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.add('hidden'),3500);}
+function logout(){localStorage.clear();location.href='/';}
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let ME=null,TAB='att',MY={classes:[],courses:[],exams:[]};
+const opt=(list,val,label)=>'<option value="">—</option>'+list.map(x=>`<option value="${x[val]}">${esc(x[label])}${x.class_name?' · '+esc(x.class_name):''}</option>`).join('');
+
+async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{location.href='/';return false;}
+  if(ME.role!=='teacher'){location.href='/';return false;}if(ME.must_change_pw){location.href='/';return false;}
+  document.getElementById('who').textContent=ME.name;MY=await api('/api/teacher/classes');return true;}
+function go(t){TAB=t;document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));render();}
+function render(){TAB==='att'?renderAtt():renderMarks();}
+
+function renderAtt(){
+  const today=new Date().toISOString().slice(0,10);
+  document.getElementById('view').innerHTML=`<div class="card"><h3>Take attendance</h3>
+    <div class="row"><select id="a_class" style="max-width:220px">${opt(MY.classes,'id','name')}</select>
+    <input id="a_date" type="date" value="${today}" style="max-width:160px">
+    <button class="btn sm" onclick="loadRoster()">Load class</button></div>
+    <div id="roster" style="margin-top:.8rem"></div></div>`;
+}
+async function loadRoster(){
+  if(!a_class.value){toast('Pick a class');return;}
+  const {students,attendance}=await api(`/api/teacher/roster?class_id=${a_class.value}&date=${a_date.value}`);
+  if(!students.length){document.getElementById('roster').innerHTML='<p class="muted">No students in this class.</p>';return;}
+  document.getElementById('roster').innerHTML=`<table><tbody>${students.map(s=>{
+    const cur=attendance[s.id]||'present';
+    return `<tr><td>${esc(s.name)}</td><td class="row" style="gap:.3rem">
+      ${['present','absent','late'].map(st=>`<button class="btn sm ${cur===st?(st==='present'?'green':st==='absent'?'red':''):'ghost'}" data-s="${s.id}" data-v="${st}" onclick="pick(this)">${st[0].toUpperCase()+st.slice(1)}</button>`).join('')}</td></tr>`;
+  }).join('')}</tbody></table><div style="margin-top:.7rem"><button class="btn green" onclick="saveAtt()">Save attendance</button></div>`;
+  window._att={};students.forEach(s=>window._att[s.id]=attendance[s.id]||'present');
+}
+function pick(btn){const sid=btn.dataset.s,val=btn.dataset.v;window._att[sid]=val;
+  btn.parentElement.querySelectorAll('button').forEach(b=>{const v=b.dataset.v;b.className='btn sm '+(v===val?(v==='present'?'green':v==='absent'?'red':''):'ghost');});}
+async function saveAtt(){
+  try{const records=Object.entries(window._att).map(([student_id,status])=>({student_id,status}));
+    const r=await api('/api/teacher/attendance',{method:'POST',body:JSON.stringify({class_id:a_class.value,date:a_date.value,records})});
+    toast('Saved '+r.saved+' records');}catch(e){toast(e.message);}
+}
+
+function renderMarks(){
+  document.getElementById('view').innerHTML=`<div class="card"><h3>Enter marks</h3>
+    <div class="row"><select id="m_exam" style="max-width:200px"><option value="">Exam…</option>${MY.exams.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>
+    <select id="m_course" style="max-width:220px">${opt(MY.courses,'id','name')}</select>
+    <button class="btn sm" onclick="loadMarks()">Load</button></div>
+    <div id="marks" style="margin-top:.8rem"></div></div>`;
+}
+async function loadMarks(){
+  if(!m_exam.value||!m_course.value){toast('Pick exam and course');return;}
+  const {students,results}=await api(`/api/teacher/results?exam_id=${m_exam.value}&course_id=${m_course.value}`);
+  if(!students.length){document.getElementById('marks').innerHTML='<p class="muted">No students for this course\'s class.</p>';return;}
+  document.getElementById('marks').innerHTML=`<table><thead><tr><th>Student</th><th>Score</th><th>Out of</th></tr></thead><tbody>${students.map(s=>{
+    const r=results[s.id]||{};return `<tr><td>${esc(s.name)}</td>
+    <td><input id="sc_${s.id}" type="number" value="${r.score??''}" style="max-width:90px"></td>
+    <td><input id="mx_${s.id}" type="number" value="${r.max_score??100}" style="max-width:90px"></td></tr>`;}).join('')}</tbody></table>
+    <div style="margin-top:.7rem"><button class="btn green" onclick="saveMarks(${JSON.stringify(students.map(s=>s.id))})">Save marks</button></div>`;
+}
+async function saveMarks(ids){
+  try{const records=ids.map(id=>({student_id:id,score:document.getElementById('sc_'+id).value||0,max_score:document.getElementById('mx_'+id).value||100}));
+    await api('/api/teacher/results',{method:'POST',body:JSON.stringify({exam_id:m_exam.value,course_id:m_course.value,records})});
+    toast('Marks saved');}catch(e){toast(e.message);}
+}
+(async()=>{if(await guard()){document.getElementById('app').classList.remove('hidden');render();}})();
+</script>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});}</script>
+</body>
+</html>

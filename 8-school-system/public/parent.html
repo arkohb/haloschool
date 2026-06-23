@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HaloSchool — Parent</title>
+<link rel="stylesheet" href="app.css">
+<script src="https://js.paystack.co/v1/inline.js"></script>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#171410">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="HaloSchool">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Halo<span>School</span> 🎓</div>
+  <span class="who" id="who"></span>
+  <div class="spacer"></div>
+  <button class="btn ghost sm" style="color:#fdf6e6;border-color:#4a443a" onclick="logout()">Sign out</button>
+</header>
+<div class="wrap" id="app" class="hidden">
+  <div id="kids" class="grid cols-2"></div>
+  <div id="detail" style="margin-top:1rem"></div>
+</div>
+<div id="toast" class="toast hidden"></div>
+<script>
+const token=localStorage.getItem('school_token');
+const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+const api=(p,o={})=>fetch(p,{...o,headers:{...H,...(o.headers||{})}}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'error');return d;});
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.add('hidden'),3800);}
+function logout(){localStorage.clear();location.href='/';}
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const gradeClass=g=>'grade'+(g||'F');let ME=null,CURSID=null;
+async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{location.href='/';return false;}
+  if(ME.role!=='parent'){location.href='/';return false;}if(ME.must_change_pw){location.href='/';return false;}
+  document.getElementById('who').textContent=ME.name;return true;}
+async function loadKids(){
+  const {children}=await api('/api/parent/children');
+  document.getElementById('kids').innerHTML=children.length?children.map(k=>`
+    <div class="card" style="cursor:pointer" onclick="openChild(${k.id})"><strong>${esc(k.name)}</strong>
+      <div class="small muted">${esc(k.class_name||'')}</div></div>`).join(''):'<p class="muted">No children linked to your account yet.</p>';
+  if(children.length)openChild(children[0].id);
+}
+async function openChild(sid){
+  CURSID=sid;const d=await api('/api/parent/child/'+sid);
+  const att=d.attendance,tot=att.present+att.absent+att.late;const cur=d.currency==='NGN'?'₦':'₵';
+  const results=d.results.map(r=>`<tr><td>${esc(r.course||'')}</td><td>${esc(r.exam||'')}</td><td>${r.score}/${r.max_score}</td><td class="${gradeClass(r.grade)}">${esc(r.grade||'')}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No marks yet</td></tr>';
+  const inv=d.invoices.map(i=>{const bal=i.amount_due_minor-i.amount_paid_minor;
+    return `<tr><td>${esc(i.title||'')}</td><td>${cur}${(i.amount_due_minor/100).toLocaleString()}</td>
+    <td><span class="pill ${i.status==='paid'?'released':i.status==='partial'?'locked':'due'}">${i.status}</span></td>
+    <td>${i.status!=='paid'?`<button class="btn sm" onclick="pay(${i.id})">Pay ${cur}${(bal/100).toLocaleString()}</button>`:'✓'}</td></tr>`;}).join('')||'<tr><td colspan="4" class="muted">No invoices</td></tr>';
+  document.getElementById('detail').innerHTML=`
+    <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(d.student.name)}</h2>
+      <button class="btn ghost sm" onclick="reportCard(${sid})">Print report card</button></div>
+      <div class="small muted">${esc(d.student.class_name||'')} · ${esc(d.student.admission_no||'')}</div></div>
+    <div class="grid cols-3" style="margin-top:.9rem">
+      <div class="stat"><div class="k">Present</div><div class="v" style="color:var(--k-green)">${att.present}</div></div>
+      <div class="stat"><div class="k">Absent</div><div class="v" style="color:var(--bad)">${att.absent}</div></div>
+      <div class="stat"><div class="k">Attendance</div><div class="v">${tot?Math.round(att.present/tot*100):0}%</div></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><h3 style="padding:.4rem">Marks</h3>
+      <table><thead><tr><th>Course</th><th>Exam</th><th>Score</th><th>Grade</th></tr></thead><tbody>${results}</tbody></table></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><h3 style="padding:.4rem">Fees</h3>
+      <table><thead><tr><th>Title</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>${inv}</tbody></table>
+      <div class="small muted" style="padding:.4rem">Pay securely by Mobile Money or card.</div></div>`;
+}
+async function pay(invoiceId){
+  try{
+    const init=await api(`/api/invoices/${invoiceId}/pay-init`,{method:'POST'});
+    const pop=PaystackPop.setup({key:init.publicKey,email:init.email||'parent@haloschool.app',amount:init.amount_minor,
+      currency:init.currency||'GHS',ref:init.reference,channels:['mobile_money','card'],
+      onSuccess:async()=>{try{await api('/api/pay/verify',{method:'POST',body:JSON.stringify({reference:init.reference})});toast('Payment confirmed');openChild(CURSID);}
+        catch(e){toast('Paid — confirming shortly');setTimeout(()=>openChild(CURSID),2500);}},
+      onCancel:()=>toast('Payment cancelled')});
+    pop.openIframe();
+  }catch(e){toast(e.message);}
+}
+async function reportCard(sid){
+  const d=await api('/api/report/'+sid);
+  const rows=d.results.map(r=>`<tr><td>${esc(r.course||'')}</td><td>${esc(r.exam||'')}</td><td>${r.score}/${r.max_score}</td><td>${esc(r.grade||'')}</td></tr>`).join('')||'<tr><td colspan="4">No results yet</td></tr>';
+  const att=d.attendance,tot=att.present+att.absent+att.late;const w=window.open('','_blank');
+  w.document.write(`<html><head><title>Report card</title><style>body{font-family:sans-serif;max-width:680px;margin:24px auto;color:#1a1712}h1{color:#d99b16}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #e2d6bd;padding:8px;text-align:left}.head{display:flex;justify-content:space-between;border-bottom:3px solid #171410;padding-bottom:8px}</style></head>
+    <body><div class="head"><div><h1>${esc(d.school.name)}</h1><div>Report Card</div></div><div style="text-align:right"><b>${esc(d.student.name)}</b><div>${esc(d.student.admission_no||'')}</div><div>${esc(d.student.class_name||'')}</div></div></div>
+    <table><thead><tr><th>Course</th><th>Exam</th><th>Score</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table>
+    <p style="margin-top:14px">Attendance: <b>${att.present}</b> present, <b>${att.absent}</b> absent, <b>${att.late}</b> late${tot?` (${Math.round(att.present/tot*100)}%)`:''}.</p>
+    <script>window.print()<\/script><script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});}</script>
+</body></html>`);w.document.close();
+}
+(async()=>{if(await guard()){document.getElementById('app').classList.remove('hidden');loadKids();}})();
+</script>
+</body>
+</html>

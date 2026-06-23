@@ -1,0 +1,9 @@
+{
+  "name": "haloschool-app",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "HaloSchool — multi-tenant school management system (enrollment, attendance, grades, timetables, fees) with Paystack MoMo/card.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=22.5.0" }
+}

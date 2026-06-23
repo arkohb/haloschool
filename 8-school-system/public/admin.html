@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HaloSchool — Admin</title>
+<link rel="stylesheet" href="app.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#171410">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="HaloSchool">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Halo<span>School</span> 🎓</div>
+  <span class="who" id="who"></span>
+  <div class="spacer"></div>
+  <button class="btn ghost sm" style="color:#fdf6e6;border-color:#4a443a" onclick="logout()">Sign out</button>
+</header>
+
+<div class="wrap" id="app" class="hidden">
+  <div class="grid cols-3" id="stats"></div>
+  <div class="tabs" style="margin-top:1rem">
+    <div class="tab on" data-t="students" onclick="go('students')">🧑‍🎓 Students</div>
+    <div class="tab" data-t="teachers" onclick="go('teachers')">👩‍🏫 Teachers</div>
+    <div class="tab" data-t="classes" onclick="go('classes')">🏫 Classes</div>
+    <div class="tab" data-t="courses" onclick="go('courses')">📚 Courses</div>
+    <div class="tab" data-t="timetable" onclick="go('timetable')">🗓️ Timetable</div>
+    <div class="tab" data-t="exams" onclick="go('exams')">📝 Exams</div>
+    <div class="tab" data-t="invoices" onclick="go('invoices')">💳 Fees</div>
+  </div>
+  <div id="cred" class="note hidden" style="margin-bottom:.8rem"></div>
+  <div id="view"></div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script>
+const token=localStorage.getItem('school_token');
+const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+const api=(p,o={})=>fetch(p,{...o,headers:{...H,...(o.headers||{})}}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'error');return d;});
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.add('hidden'),4000);}
+function logout(){localStorage.clear();location.href='/';}
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let CUR='₵';const fmt=m=>CUR+(Number(m||0)/100).toLocaleString();
+let ME=null, TAB='students', CACHE={classes:[],teachers:[],students:[],exams:[],courses:[]};
+const DAYS=['','Mon','Tue','Wed','Thu','Fri'];
+
+async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{location.href='/';return false;}
+  if(ME.role!=='school_admin'){location.href='/';return false;}
+  if(ME.must_change_pw){location.href='/';return false;}
+  CUR=ME.school?.currency==='NGN'?'₦':'₵';
+  document.getElementById('who').textContent=ME.school?.name||'';return true;}
+
+async function loadStats(){const o=await api('/api/admin/overview');
+  document.getElementById('stats').innerHTML=`
+   <div class="stat"><div class="k">Students</div><div class="v">${o.students}</div></div>
+   <div class="stat"><div class="k">Teachers</div><div class="v">${o.teachers}</div></div>
+   <div class="stat"><div class="k">Classes</div><div class="v">${o.classes}</div></div>
+   <div class="stat"><div class="k">Fees outstanding</div><div class="v" style="color:var(--accent)">${fmt(o.fees_due)}</div></div>
+   <div class="stat"><div class="k">Fees paid</div><div class="v" style="color:var(--k-green)">${fmt(o.fees_paid)}</div></div>`;}
+
+async function refreshCache(){
+  CACHE.classes=(await api('/api/admin/classes')).classes;
+  CACHE.teachers=(await api('/api/admin/teachers')).teachers;
+}
+function showCred(html){const c=document.getElementById('cred');c.innerHTML=html+' <button class="btn ghost sm" onclick="this.parentElement.classList.add(\'hidden\')">dismiss</button>';c.classList.remove('hidden');}
+function opt(list,val,label,sel){return '<option value="">—</option>'+list.map(x=>`<option value="${x[val]}" ${x[val]==sel?'selected':''}>${esc(x[label])}</option>`).join('');}
+
+function go(t){TAB=t;document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));render();}
+async function render(){
+  const v=document.getElementById('view');v.innerHTML='<p class="muted">Loading…</p>';
+  if(TAB==='students')return renderStudents(v);
+  if(TAB==='teachers')return renderTeachers(v);
+  if(TAB==='classes')return renderClasses(v);
+  if(TAB==='courses')return renderCourses(v);
+  if(TAB==='timetable')return renderTimetable(v);
+  if(TAB==='exams')return renderExams(v);
+  if(TAB==='invoices')return renderInvoices(v);
+}
+
+/* ---- Students ---- */
+async function renderStudents(v){
+  await refreshCache();
+  const {students}=await api('/api/admin/students');CACHE.students=students;
+  v.innerHTML=`<div class="card"><h3>Enroll a student</h3>
+    <div class="grid cols-2">
+      <div><label>Student name</label><input id="s_name"></div>
+      <div><label>Class</label><select id="s_class">${opt(CACHE.classes,'id','name')}</select></div>
+      <div><label>Grade</label><input id="s_grade" placeholder="JHS 1"></div>
+      <div><label>Section</label><input id="s_section" placeholder="A"></div>
+      <div><label>Student email (optional)</label><input id="s_email" type="email"></div>
+      <div><label>Student phone (optional)</label><input id="s_phone"></div>
+    </div>
+    <div class="divider"></div><div class="small muted">Optional parent/guardian (gets their own login + fee alerts)</div>
+    <div class="grid cols-3">
+      <div><label>Parent name</label><input id="p_name"></div>
+      <div><label>Parent email</label><input id="p_email" type="email"></div>
+      <div><label>Parent phone</label><input id="p_phone"></div>
+    </div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addStudent()">Enroll & create login</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem">
+      <table><thead><tr><th>Name</th><th>Adm. no</th><th>Class</th><th>Login</th><th>Parent</th><th></th></tr></thead>
+      <tbody>${students.map(s=>`<tr><td><strong>${esc(s.name)}</strong></td><td class="small">${esc(s.admission_no||'')}</td>
+        <td>${esc(s.class_name||'—')}</td><td class="small">${esc(s.login_id)}</td><td class="small">${esc(s.parent_name||'—')}</td>
+        <td><button class="btn ghost sm" onclick="reportCard(${s.id})">Report card</button></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No students yet</td></tr>'}</tbody></table></div>`;
+}
+async function addStudent(){
+  try{const r=await api('/api/admin/students',{method:'POST',body:JSON.stringify({
+    name:s_name.value,email:s_email.value,phone:s_phone.value,class_id:s_class.value||null,grade:s_grade.value,section:s_section.value,
+    parent_name:p_name.value,parent_email:p_email.value,parent_phone:p_phone.value})});
+    let msg=`✅ <b>${esc(s_name.value)}</b> enrolled. Student login: <span class="cred">${r.student_login}</span> password <span class="cred">${r.student_password}</span>`;
+    if(r.parent_login)msg+=`<br>Parent login: <span class="cred">${r.parent_login}</span> password <span class="cred">${r.parent_password}</span>`;
+    showCred(msg);loadStats();render();}catch(e){toast(e.message);}
+}
+/* ---- Teachers ---- */
+async function renderTeachers(v){
+  const {teachers}=await api('/api/admin/teachers');CACHE.teachers=teachers;
+  v.innerHTML=`<div class="card"><h3>Add a teacher</h3><div class="grid cols-2">
+    <div><label>Name</label><input id="t_name"></div><div><label>Subjects</label><input id="t_sub" placeholder="Maths, Science"></div>
+    <div><label>Email (optional)</label><input id="t_email" type="email"></div><div><label>Phone (optional)</label><input id="t_phone"></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addTeacher()">Add & create login</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><table><thead><tr><th>Name</th><th>Subjects</th><th>Login</th><th>Contact</th></tr></thead>
+    <tbody>${teachers.map(t=>`<tr><td><strong>${esc(t.name)}</strong></td><td>${esc(t.subjects||'')}</td><td class="small">${esc(t.login_id)}</td>
+      <td class="small muted">${esc(t.email||t.phone||'')}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No teachers yet</td></tr>'}</tbody></table></div>`;
+}
+async function addTeacher(){
+  try{const r=await api('/api/admin/teachers',{method:'POST',body:JSON.stringify({name:t_name.value,subjects:t_sub.value,email:t_email.value,phone:t_phone.value})});
+    showCred(`✅ Teacher <b>${esc(t_name.value)}</b> added. Login: <span class="cred">${r.login_id}</span> password <span class="cred">${r.password}</span>`);loadStats();render();}catch(e){toast(e.message);}
+}
+/* ---- Classes ---- */
+async function renderClasses(v){
+  await refreshCache();const {classes}=await api('/api/admin/classes');
+  v.innerHTML=`<div class="card"><h3>Add a class</h3><div class="grid cols-3">
+    <div><label>Name</label><input id="c_name" placeholder="JHS 1"></div><div><label>Section</label><input id="c_section" placeholder="A"></div>
+    <div><label>Class teacher</label><select id="c_teacher">${opt(CACHE.teachers,'id','name')}</select></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addClass()">Add class</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><table><thead><tr><th>Class</th><th>Section</th><th>Teacher</th><th>Students</th></tr></thead>
+    <tbody>${classes.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.section||'')}</td><td>${esc(c.teacher_name||'—')}</td><td>${c.students}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No classes</td></tr>'}</tbody></table></div>`;
+}
+async function addClass(){try{await api('/api/admin/classes',{method:'POST',body:JSON.stringify({name:c_name.value,section:c_section.value,teacher_id:c_teacher.value||null})});toast('Class added');loadStats();render();}catch(e){toast(e.message);}}
+/* ---- Courses ---- */
+async function renderCourses(v){
+  await refreshCache();const {courses}=await api('/api/admin/courses');
+  v.innerHTML=`<div class="card"><h3>Add a course</h3><div class="grid cols-2">
+    <div><label>Course name</label><input id="co_name" placeholder="Mathematics"></div><div><label>Code</label><input id="co_code" placeholder="MATH"></div>
+    <div><label>Class</label><select id="co_class">${opt(CACHE.classes,'id','name')}</select></div>
+    <div><label>Teacher</label><select id="co_teacher">${opt(CACHE.teachers,'id','name')}</select></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addCourse()">Add course</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><table><thead><tr><th>Course</th><th>Code</th><th>Class</th><th>Teacher</th></tr></thead>
+    <tbody>${courses.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.code||'')}</td><td>${esc(c.class_name||'—')}</td><td>${esc(c.teacher_name||'—')}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No courses</td></tr>'}</tbody></table></div>`;
+}
+async function addCourse(){try{await api('/api/admin/courses',{method:'POST',body:JSON.stringify({name:co_name.value,code:co_code.value,class_id:co_class.value||null,teacher_id:co_teacher.value||null})});toast('Course added');render();}catch(e){toast(e.message);}}
+/* ---- Timetable ---- */
+async function renderTimetable(v){
+  await refreshCache();
+  v.innerHTML=`<div class="card"><div class="row"><label style="margin:0">Class</label>
+    <select id="tt_class" onchange="loadTT()" style="max-width:200px">${opt(CACHE.classes,'id','name')}</select></div>
+    <div id="ttGrid" style="margin-top:.8rem"></div></div>`;
+}
+async function loadTT(){
+  const cid=tt_class.value;if(!cid){document.getElementById('ttGrid').innerHTML='';return;}
+  const {slots}=await api('/api/admin/timetable?class_id='+cid);
+  const courses=(await api('/api/admin/courses')).courses.filter(c=>c.class_id==cid);
+  const byKey={};slots.forEach(s=>byKey[s.day+'-'+s.period]=s);
+  let grid='<div class="tt-grid"><div class="hd">Period</div>'+DAYS.slice(1).map(d=>`<div class="hd">${d}</div>`).join('');
+  for(let pr=1;pr<=6;pr++){grid+=`<div class="hd">P${pr}</div>`;for(let d=1;d<=5;d++){const s=byKey[d+'-'+pr];grid+=`<div>${s?esc(s.course_name||'—'):'·'}</div>`;}}
+  grid+='</div>';
+  grid+=`<div class="divider"></div><div class="grid cols-3">
+    <div><label>Day</label><select id="tt_day">${[1,2,3,4,5].map(d=>`<option value="${d}">${DAYS[d]}</option>`).join('')}</select></div>
+    <div><label>Period</label><select id="tt_period">${[1,2,3,4,5,6].map(p=>`<option value="${p}">P${p}</option>`).join('')}</select></div>
+    <div><label>Course</label><select id="tt_course">${opt(courses,'id','name')}</select></div></div>
+    <div class="row" style="margin-top:.5rem"><input id="tt_start" placeholder="08:00" style="max-width:110px"><input id="tt_end" placeholder="08:45" style="max-width:110px">
+    <button class="btn sm green" onclick="addSlot()">Add slot</button></div>`;
+  document.getElementById('ttGrid').innerHTML=grid;
+}
+async function addSlot(){try{await api('/api/admin/timetable',{method:'POST',body:JSON.stringify({class_id:tt_class.value,day:tt_day.value,period:tt_period.value,course_id:tt_course.value||null,start_time:tt_start.value,end_time:tt_end.value})});toast('Slot added');loadTT();}catch(e){toast(e.message);}}
+/* ---- Exams ---- */
+async function renderExams(v){
+  await refreshCache();const {exams}=await api('/api/admin/exams');
+  v.innerHTML=`<div class="card"><h3>Create an exam</h3><div class="grid cols-3">
+    <div><label>Name</label><input id="e_name" placeholder="End of Term 1"></div><div><label>Term</label><input id="e_term" placeholder="Term 1"></div>
+    <div><label>Class</label><select id="e_class">${opt(CACHE.classes,'id','name')}</select></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addExam()">Create exam</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><table><thead><tr><th>Exam</th><th>Term</th><th>Class</th></tr></thead>
+    <tbody>${exams.map(e=>`<tr><td><strong>${esc(e.name)}</strong></td><td>${esc(e.term||'')}</td><td>${esc(e.class_name||'—')}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">No exams</td></tr>'}</tbody></table></div>`;
+}
+async function addExam(){try{await api('/api/admin/exams',{method:'POST',body:JSON.stringify({name:e_name.value,term:e_term.value,class_id:e_class.value||null})});toast('Exam created');render();}catch(e){toast(e.message);}}
+/* ---- Invoices ---- */
+async function renderInvoices(v){
+  if(!CACHE.students.length)CACHE.students=(await api('/api/admin/students')).students;
+  const {invoices,currency}=await api('/api/admin/invoices');CUR=currency==='NGN'?'₦':'₵';
+  v.innerHTML=`<div class="card"><h3>Create a fee invoice</h3><div class="grid cols-2">
+    <div><label>Student</label><select id="i_student">${opt(CACHE.students,'id','name')}</select></div>
+    <div><label>Amount (${CUR})</label><input id="i_amount" type="number" min="1"></div>
+    <div><label>Title</label><input id="i_title" placeholder="Term 1 fees"></div>
+    <div><label>Term</label><input id="i_term" placeholder="Term 1"></div>
+    <div><label>Due date</label><input id="i_due" type="date"></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addInvoice()">Create invoice</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><table><thead><tr><th>Student</th><th>Title</th><th>Due</th><th>Paid</th><th>Status</th></tr></thead>
+    <tbody>${invoices.map(i=>`<tr><td><strong>${esc(i.student_name)}</strong><div class="small muted">${esc(i.admission_no||'')}</div></td>
+      <td>${esc(i.title||'')}</td><td>${fmt(i.amount_due_minor)}</td><td>${fmt(i.amount_paid_minor)}</td>
+      <td><span class="pill ${i.status==='paid'?'released':i.status==='partial'?'locked':'due'}">${i.status}</span></td></tr>`).join('')||'<tr><td colspan="5" class="muted">No invoices</td></tr>'}</tbody></table></div>`;
+}
+async function addInvoice(){try{await api('/api/admin/invoices',{method:'POST',body:JSON.stringify({student_id:i_student.value,amount:i_amount.value,title:i_title.value,term:i_term.value,due_date:i_due.value})});toast('Invoice created — parent notified');loadStats();render();}catch(e){toast(e.message);}}
+
+/* ---- printable report card ---- */
+async function reportCard(sid){
+  try{const d=await api('/api/report/'+sid);
+    const rows=d.results.map(r=>`<tr><td>${esc(r.course||'')}</td><td>${esc(r.exam||'')}</td><td>${r.score}/${r.max_score}</td><td>${esc(r.grade||'')}</td></tr>`).join('')||'<tr><td colspan="4">No results yet</td></tr>';
+    const att=d.attendance;const tot=att.present+att.absent+att.late;
+    const w=window.open('','_blank');
+    w.document.write(`<html><head><title>Report card — ${esc(d.student.name)}</title>
+      <style>body{font-family:sans-serif;max-width:680px;margin:24px auto;color:#1a1712}h1{color:#d99b16}
+      table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #e2d6bd;padding:8px;text-align:left}
+      .head{display:flex;justify-content:space-between;border-bottom:3px solid #171410;padding-bottom:8px}</style></head>
+      <body><div class="head"><div><h1>${esc(d.school.name)}</h1><div>Report Card</div></div>
+      <div style="text-align:right"><div><b>${esc(d.student.name)}</b></div><div>${esc(d.student.admission_no||'')}</div><div>${esc(d.student.class_name||'')}</div></div></div>
+      <table><thead><tr><th>Course</th><th>Exam</th><th>Score</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table>
+      <p style="margin-top:14px">Attendance: <b>${att.present}</b> present, <b>${att.absent}</b> absent, <b>${att.late}</b> late${tot?` (${Math.round(att.present/tot*100)}% present)`:''}.</p>
+      <p style="color:#777;font-size:12px">Generated by HaloSchool</p>
+      <script>window.print()<\/script><script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});}</script>
+</body></html>`);w.document.close();
+  }catch(e){toast(e.message);}
+}
+(async()=>{if(await guard()){document.getElementById('app').classList.remove('hidden');loadStats();render();}})();
+</script>
+</body>
+</html>

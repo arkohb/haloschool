@@ -1,0 +1,130 @@
+================================================================
+HaloSchool — School Management System  ·  SETUP & DEPLOYMENT
+================================================================
+Folder: 8-school-system/
+Same stack and one-click Railway deploy as the rest of the bundle:
+one self-contained Node service (built-in node:sqlite, zero npm
+dependencies) that serves BOTH the API and all role dashboards.
+Payments by Mobile Money / card through Paystack.
+
+----------------------------------------------------------------
+WHAT IT DOES
+----------------------------------------------------------------
+A multi-tenant SaaS: any number of schools can register and run on
+the same service, each fully isolated (every record is scoped by
+school_id). Five roles:
+
+  • Super admin (you)   – approve / suspend schools, platform stats
+  • School admin        – students, teachers, classes, courses,
+                          timetable, exams, fee invoices, reports
+  • Teacher             – take attendance, enter exam marks
+  • Student             – timetable, attendance %, marks, report card
+  • Parent              – child progress + pay fees by MoMo / card
+
+Core flows: enrollment with auto-generated logins, daily attendance
+(absent → parent notified), grade entry with automatic A–F grading,
+printable report cards, fee invoices paid online with server-side
+verification, audit log for payments and grade changes.
+
+----------------------------------------------------------------
+HOW LOGINS WORK
+----------------------------------------------------------------
+• A school registers at "/" → it shows as Pending.
+• You (super admin) approve it at "/super".
+• The school admin then signs in and is forced to set a new password.
+• When the admin adds a teacher / student / parent, the system
+  generates a login ID + a temporary password and shows them on
+  screen (and texts/emails them if contact details were given).
+  That person changes the password on first sign-in.
+• Login ID is the person's email if given, otherwise an auto ID like
+  SUNRI-s3f9 (school code + role letter + random).
+
+----------------------------------------------------------------
+ENVIRONMENT VARIABLES
+----------------------------------------------------------------
+Required:
+  AUTH_SECRET            long random string (signs login tokens)
+  PAYSTACK_SECRET_KEY    sk_test_... then sk_live_...
+  PAYSTACK_PUBLIC_KEY    pk_test_... then pk_live_...
+  SUPER_ADMIN_EMAIL      your platform-admin login
+  SUPER_ADMIN_PASSWORD   your platform-admin password
+  CURRENCY               GHS (default) or NGN
+  APP_URL                https://YOUR-APP.up.railway.app  (used in messages)
+
+Optional (notifications — without them, messages just print to logs):
+  RESEND_API_KEY, MAIL_FROM        email (credentials, invoices, alerts)
+  ARKESEL_API_KEY, SMS_SENDER      SMS in Ghana (11 chars max sender)
+
+Do NOT set PORT — Railway provides it.
+If SUPER_ADMIN_* are unset on first boot, a super admin is created and
+its credentials are printed once to the deploy logs.
+
+----------------------------------------------------------------
+DEPLOY ON RAILWAY (one path)
+----------------------------------------------------------------
+1. Push the 8-school-system folder to GitHub as its own repo.
+2. Railway → New Project → Deploy from GitHub repo → pick it.
+   It auto-detects the Dockerfile (Node 22) and builds. No build
+   command to configure.
+3. Add a Volume (Service → Settings → Volumes), any mount path
+   e.g. /data. Railway sets RAILWAY_VOLUME_MOUNT_PATH automatically and
+   the app stores school.db there. Skip this and data resets on every
+   redeploy.
+4. Add the environment variables above (Variables tab).
+5. After it deploys, open  https://YOUR-APP.up.railway.app/health
+   → expect {"ok":true}. Railway's healthcheck also pings /health.
+6. Paystack dashboard → Settings → Webhooks, add:
+     https://YOUR-APP.up.railway.app/paystack/webhook
+
+That's it — the same flow as the susu app and the order server.
+
+----------------------------------------------------------------
+FIRST RUN (smoke test)
+----------------------------------------------------------------
+1. Open "/super" and sign in with SUPER_ADMIN_EMAIL / PASSWORD.
+2. Open "/" in another tab → "Register your school" → fill it in.
+3. Back in "/super" → Approve the new school.
+4. Sign in as the school admin (the email/password you registered) →
+   set a new password → you land on the admin dashboard.
+5. Add a teacher, a class, a course, then enroll a student (add the
+   parent details too). Copy the generated logins shown on screen.
+6. Sign in as the teacher → take attendance and enter marks.
+7. Sign in as the student → see timetable, attendance %, grades, and
+   "Print report card".
+8. Sign in as the parent → open the child → "Pay" an invoice with a
+   Paystack TEST MoMo number → it flips to "paid".
+
+----------------------------------------------------------------
+PAYSTACK NOTES
+----------------------------------------------------------------
+• Fees are paid from the parent/student page via Paystack inline
+  (MoMo or card). The amount is the invoice's remaining balance.
+• Nothing is marked paid from the browser: the server re-verifies the
+  charge with Paystack (and the webhook does too), checks the amount,
+  then updates the invoice (paid / partial) — never trust the client.
+• Amounts are stored in the smallest unit (pesewas/kobo). Currency is
+  per school (GHS or NGN).
+• Start with test keys; switching to live is a one-line env change.
+
+----------------------------------------------------------------
+GO-LIVE CHECKLIST
+----------------------------------------------------------------
+[ ] Swap PAYSTACK_* test keys for live keys.
+[ ] Set a strong AUTH_SECRET and SUPER_ADMIN_PASSWORD.
+[ ] Set APP_URL to your real Railway/custom domain.
+[ ] Confirm the Volume is attached (data persists).
+[ ] Set the live Paystack webhook URL.
+[ ] Add RESEND/ARKESEL keys so credentials and alerts actually send.
+
+----------------------------------------------------------------
+NOTE ON THE STACK
+----------------------------------------------------------------
+Your build prompt described a Postgres + Prisma + React/Vite/Netlify
+split. This implementation keeps every security principle from that
+spec — RBAC on every endpoint, per-tenant school_id isolation,
+server-side payment verification, audit logging, hashed passwords,
+secrets in env vars — but uses the SAME single-service Node + SQLite
+stack as your other apps so deployment is identical (one repo, one
+Railway service, a Dockerfile, a Volume). If you ever outgrow SQLite,
+the data model maps cleanly onto Postgres later.
+================================================================
