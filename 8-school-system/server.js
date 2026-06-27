@@ -614,11 +614,12 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === "GET" && p === "/api/teacher/results") {
         const examId = Number(q.get("exam_id")), courseId = Number(q.get("course_id"));
-        const course = db.prepare("SELECT * FROM courses WHERE id=? AND school_id=?").get(courseId, S);
+        const course = courseId ? db.prepare("SELECT * FROM courses WHERE id=? AND school_id=?").get(courseId, S) : null;
+        if (!course) return json(res, 200, { students: [], results: {} });
         const students = db.prepare(`SELECT s.id,u.name FROM students s JOIN users u ON u.id=s.user_id
-          WHERE s.school_id=? AND s.class_id=? ORDER BY u.name`).all(S, course?.class_id);
+          WHERE s.school_id=? AND s.class_id=? ORDER BY u.name`).all(S, course.class_id);
         const existing = {};
-        db.prepare("SELECT student_id,score,max_score FROM results WHERE exam_id=? AND course_id=?").all(examId, courseId).forEach((r) => existing[r.student_id] = r);
+        if (examId) db.prepare("SELECT student_id,score,max_score FROM results WHERE exam_id=? AND course_id=?").all(examId, courseId).forEach((r) => existing[r.student_id] = r);
         return json(res, 200, { students, results: existing });
       }
       if (req.method === "POST" && p === "/api/teacher/results") {
