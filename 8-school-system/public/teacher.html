@@ -41,8 +41,8 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;',
 let ME=null,TAB='att',MY={classes:[],courses:[],exams:[]};
 const opt=(list,val,label)=>'<option value="">—</option>'+list.map(x=>`<option value="${x[val]}">${esc(x[label])}${x.class_name?' · '+esc(x.class_name):''}</option>`).join('');
 
-async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{location.href='/';return false;}
-  if(ME.role!=='teacher'){location.href='/';return false;}if(ME.must_change_pw){location.href='/';return false;}
+async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{localStorage.clear();location.href='/';return false;}
+  if(ME.role!=='teacher'){localStorage.clear();location.href='/';return false;}if(ME.must_change_pw){location.href='/';return false;}
   document.getElementById('who').textContent=ME.name;MY=await api('/api/teacher/classes');return true;}
 function go(t){TAB=t;document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));render();}
 function render(){TAB==='att'?renderAtt():renderMarks();}

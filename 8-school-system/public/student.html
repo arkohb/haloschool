@@ -32,8 +32,8 @@ function logout(){localStorage.clear();location.href='/';}
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const DAYS=['','Mon','Tue','Wed','Thu','Fri'];let ME=null,SID=null;
 const gradeClass=g=>'grade'+(g||'F');
-async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{location.href='/';return false;}
-  if(ME.role!=='student'){location.href='/';return false;}if(ME.must_change_pw){location.href='/';return false;}
+async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{localStorage.clear();location.href='/';return false;}
+  if(ME.role!=='student'){localStorage.clear();location.href='/';return false;}if(ME.must_change_pw){location.href='/';return false;}
   document.getElementById('who').textContent=ME.name;return true;}
 function ttGrid(slots){
   const byKey={};slots.forEach(s=>byKey[s.day+'-'+s.period]=s);
@@ -71,10 +71,11 @@ async function reportCard(){
     <body><div class="head"><div><h1>${esc(d.school.name)}</h1><div>Report Card</div></div><div style="text-align:right"><b>${esc(d.student.name)}</b><div>${esc(d.student.admission_no||'')}</div><div>${esc(d.student.class_name||'')}</div></div></div>
     <table><thead><tr><th>Course</th><th>Exam</th><th>Score</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table>
     <p style="margin-top:14px">Attendance: <b>${att.present}</b> present, <b>${att.absent}</b> absent, <b>${att.late}</b> late${tot?` (${Math.round(att.present/tot*100)}%)`:''}.</p>
-    <script>window.print()<\/script><script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});}</script>
+    <script>window.print()<\/script>
 </body></html>`);w.document.close();
 }
 (async()=>{if(await guard()){document.getElementById('app').classList.remove('hidden');load();}})();
 </script>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});}</script>
 </body>
 </html>

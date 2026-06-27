@@ -3,9 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HaloSusu — My groups</title>
+<title>HaloSchool — Admin</title>
 <link rel="stylesheet" href="app.css">
-<script src="https://js.paystack.co/v1/inline.js"></script>
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#171410">
   <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
@@ -13,278 +12,222 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="HaloSusu">
+  <meta name="apple-mobile-web-app-title" content="HaloSchool">
 </head>
 <body>
 <header class="bar">
-  <div class="brand">Halo<span>Susu</span></div>
+  <div class="brand">Halo<span>School</span> 🎓</div>
   <span class="who" id="who"></span>
   <div class="spacer"></div>
   <button class="btn ghost sm" style="color:#fdf6e6;border-color:#4a443a" onclick="logout()">Sign out</button>
 </header>
 
-<div class="wrap">
-  <!-- choose a plan (shown when no tier yet) -->
-  <div id="planGate" class="card hidden">
-    <h2>Choose a plan to start</h2>
-    <p class="small muted">Pay by MoMo or card. Your plan sets how many groups you can run and
-      how many members each can have.</p>
-    <div id="planTiers" class="grid cols-3" style="margin-top:.6rem"></div>
+<div class="wrap" id="app" class="hidden">
+  <div class="grid cols-3" id="stats"></div>
+  <div class="tabs" style="margin-top:1rem">
+    <div class="tab on" data-t="students" onclick="go('students')">🧑‍🎓 Students</div>
+    <div class="tab" data-t="teachers" onclick="go('teachers')">👩‍🏫 Teachers</div>
+    <div class="tab" data-t="classes" onclick="go('classes')">🏫 Classes</div>
+    <div class="tab" data-t="courses" onclick="go('courses')">📚 Courses</div>
+    <div class="tab" data-t="timetable" onclick="go('timetable')">🗓️ Timetable</div>
+    <div class="tab" data-t="exams" onclick="go('exams')">📝 Exams</div>
+    <div class="tab" data-t="invoices" onclick="go('invoices')">💳 Fees</div>
   </div>
-
-  <!-- list view -->
-  <div id="listView" class="hidden">
-    <div class="row" style="justify-content:space-between">
-      <h2>My groups</h2>
-      <button class="btn" onclick="toggleNew()">+ New group</button>
-    </div>
-    <div id="limits" class="small muted"></div>
-
-    <div id="newGroup" class="card hidden" style="margin:.7rem 0">
-      <div class="grid cols-2">
-        <div><label>Group name</label><input id="g_name" placeholder="Market Women Susu"></div>
-        <div><label>Contribution per turn (₵)</label><input id="g_amount" type="number" min="1" placeholder="200"></div>
-        <div><label>Frequency</label><select id="g_freq"><option value="weekly">Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly" selected>Monthly</option></select></div>
-        <div><label>Payout order</label><select id="g_rot"><option value="join_order">Order members were added</option><option value="random">Random draw</option></select></div>
-      </div>
-      <div style="margin-top:.8rem"><button class="btn green" onclick="createGroup()">Create group</button></div>
-    </div>
-
-    <div id="groupList" class="grid cols-2" style="margin-top:.6rem"></div>
-  </div>
-
-  <!-- detail view -->
-  <div id="detailView" class="hidden">
-    <button class="btn ghost sm" onclick="backToList()">← All groups</button>
-    <div id="detail"></div>
-  </div>
+  <div id="cred" class="note hidden" style="margin-bottom:.8rem"></div>
+  <div id="view"></div>
 </div>
 
 <div id="toast" class="toast hidden"></div>
 <script>
-const token = localStorage.getItem('susu_token');
-const H = { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' };
-const api = (path, opts={}) => fetch(path,{...opts,headers:{...H,...(opts.headers||{})}}).then(async r=>{
-  const d = await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.error||'error'); return d; });
-function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.remove('hidden');
-  clearTimeout(t._h);t._h=setTimeout(()=>t.classList.add('hidden'),3800);}
-function logout(){ localStorage.removeItem('susu_token'); location.href='/'; }
-const fmt = m => '₵'+(Number(m||0)/100).toLocaleString();
-const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let ME=null;
+const token=localStorage.getItem('school_token');
+const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+const api=(p,o={})=>fetch(p,{...o,headers:{...H,...(o.headers||{})}}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'error');return d;});
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.add('hidden'),4000);}
+function logout(){localStorage.clear();location.href='/';}
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let CUR='₵';const fmt=m=>CUR+(Number(m||0)/100).toLocaleString();
+let ME=null, TAB='students', CACHE={classes:[],teachers:[],students:[],exams:[],courses:[]};
+const DAYS=['','Mon','Tue','Wed','Thu','Fri'];
 
-async function guard(){
-  if(!token){ location.href='/'; return false; }
-  try{ ME = await api('/api/me'); }catch{ location.href='/'; return false; }
-  if(ME.role!=='group'){ location.href='/'; return false; }
-  if(ME.status!=='active'){ document.body.innerHTML='<div class="wrap"><div class="note">Your account is awaiting super-admin approval.</div></div>'; return false; }
-  document.getElementById('who').textContent = ME.name + (ME.tier?(' · '+ME.tier+' plan'):'');
-  return true;
+async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{localStorage.clear();location.href='/';return false;}
+  if(ME.role!=='school_admin'){localStorage.clear();location.href='/';return false;}
+  if(ME.must_change_pw){location.href='/';return false;}
+  CUR=ME.school?.currency==='NGN'?'₦':'₵';
+  document.getElementById('who').textContent=ME.school?.name||'';return true;}
+
+async function loadStats(){const o=await api('/api/admin/overview');
+  document.getElementById('stats').innerHTML=`
+   <div class="stat"><div class="k">Students</div><div class="v">${o.students}</div></div>
+   <div class="stat"><div class="k">Teachers</div><div class="v">${o.teachers}</div></div>
+   <div class="stat"><div class="k">Classes</div><div class="v">${o.classes}</div></div>
+   <div class="stat"><div class="k">Fees outstanding</div><div class="v" style="color:var(--accent)">${fmt(o.fees_due)}</div></div>
+   <div class="stat"><div class="k">Fees paid</div><div class="v" style="color:var(--k-green)">${fmt(o.fees_paid)}</div></div>`;}
+
+async function refreshCache(){
+  CACHE.classes=(await api('/api/admin/classes')).classes;
+  CACHE.teachers=(await api('/api/admin/teachers')).teachers;
+}
+function showCred(html){const c=document.getElementById('cred');c.innerHTML=html+' <button class="btn ghost sm" onclick="this.parentElement.classList.add(\'hidden\')">dismiss</button>';c.classList.remove('hidden');}
+function opt(list,val,label,sel){return '<option value="">—</option>'+list.map(x=>`<option value="${x[val]}" ${x[val]==sel?'selected':''}>${esc(x[label])}</option>`).join('');}
+
+function go(t){TAB=t;document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));render();}
+async function render(){
+  const v=document.getElementById('view');v.innerHTML='<p class="muted">Loading…</p>';
+  if(TAB==='students')return renderStudents(v);
+  if(TAB==='teachers')return renderTeachers(v);
+  if(TAB==='classes')return renderClasses(v);
+  if(TAB==='courses')return renderCourses(v);
+  if(TAB==='timetable')return renderTimetable(v);
+  if(TAB==='exams')return renderExams(v);
+  if(TAB==='invoices')return renderInvoices(v);
 }
 
-/* ---------- plan gate ---------- */
-async function maybeGate(){
-  if(ME.groups_allowed>0){ document.getElementById('listView').classList.remove('hidden'); loadGroups(); return; }
-  const {tiers} = await api('/api/tiers');
-  document.getElementById('planGate').classList.remove('hidden');
-  document.getElementById('planTiers').innerHTML = tiers.map(t=>`
-    <div class="card">
-      <div class="row" style="justify-content:space-between"><strong>${t.name}</strong>
-        <span class="pill locked">${t.price_minor?fmt(t.price_minor):'Free'}</span></div>
-      <div class="small muted" style="margin:.3rem 0">${esc(t.blurb||'')}</div>
-      <div class="small">${t.max_groups} group(s) · up to ${t.max_members} members</div>
-      <div style="margin-top:.7rem"><button class="btn" onclick="pickTier(${t.id},${t.price_minor})">Choose ${esc(t.name)}</button></div>
-    </div>`).join('');
-}
-async function pickTier(id, price){
-  try{
-    const r = await api('/api/tiers/subscribe',{method:'POST',body:JSON.stringify({tier_id:id})});
-    if(r.free){ toast('Plan activated'); location.reload(); return; }
-    payWithPaystack(r, async ()=>{ await api('/api/pay/verify',{method:'POST',body:JSON.stringify({reference:r.reference})}); toast('Plan activated'); location.reload(); });
-  }catch(e){ toast(e.message); }
-}
-function payWithPaystack(init, onDone){
-  const pop = PaystackPop.setup({
-    key: init.publicKey, email: init.email || 'admin@halosusu.app',
-    amount: init.amount_minor, currency: init.currency||'GHS', ref: init.reference,
-    channels:['mobile_money','card'],
-    onSuccess: onDone, onCancel: ()=>toast('Payment cancelled')
-  });
-  pop.openIframe();
-}
-
-/* ---------- groups ---------- */
-function toggleNew(){ document.getElementById('newGroup').classList.toggle('hidden'); }
-async function loadGroups(){
-  const {groups, limits} = await api('/api/groups');
-  document.getElementById('limits').textContent =
-    `Using ${limits.groups_used} of ${limits.groups_allowed} active group(s) · up to ${limits.members_per_group} members each`;
-  document.getElementById('groupList').innerHTML = groups.length ? groups.map(g=>`
-    <div class="card" style="cursor:pointer" onclick="openGroup(${g.id})">
-      <div class="row" style="justify-content:space-between">
-        <strong>${esc(g.name)}</strong><span class="pill ${g.status}">${g.status}</span></div>
-      <div class="small muted" style="margin-top:.3rem">${fmt(g.contribution_minor)} / ${g.frequency} · ${g.members} members</div>
-      ${g.status==='active'?`<div class="small" style="margin-top:.3rem">Turn ${g.current_cycle} of ${g.num_cycles}</div>`:''}
-    </div>`).join('') : '<p class="muted">No groups yet. Create your first one.</p>';
-}
-async function createGroup(){
-  try{
-    await api('/api/groups',{method:'POST',body:JSON.stringify({
-      name:g_name.value, contribution:g_amount.value, frequency:g_freq.value, rotation:g_rot.value })});
-    toast('Group created'); g_name.value=''; g_amount.value=''; toggleNew(); loadGroups();
-  }catch(e){ toast(e.message); }
-}
-
-/* ---------- group detail ---------- */
-function backToList(){ document.getElementById('detailView').classList.add('hidden');
-  document.getElementById('listView').classList.remove('hidden'); loadGroups(); }
-async function openGroup(id){
-  document.getElementById('listView').classList.add('hidden');
-  document.getElementById('detailView').classList.remove('hidden');
-  renderDetail(await api('/api/groups/'+id));
-}
-function renderDetail(d){
-  const g = d.group, origin = location.origin;
-  const isDraft = g.status==='draft', isActive = g.status==='active';
-  const memberRows = d.members.map(m=>`
-    <tr>
-      <td>${m.position?('#'+m.position+'  '):''}<strong>${esc(m.name)}</strong>
-        ${m.auto_charge?'<span class="pill locked" title="auto-charge enabled">auto</span>':''}
-        <span class="pill ${m.payout_ready?'released':'due'}" title="disbursement method">${m.payout_ready?'payout set':'no payout'}</span>
-        <div class="small muted">${esc(m.phone||'')}</div>
-        <div class="linkbox" style="margin-top:.3rem">${origin}/pay?t=${m.pay_token}
-          <button class="btn ghost sm" style="margin-left:.4rem" onclick="copyLink('${origin}/pay?t=${m.pay_token}')">Copy</button></div>
-        <div style="margin-top:.35rem"><button class="btn ghost sm" onclick="togglePayout(${m.id})">${m.payout_ready?'Update':'Set'} payout method</button></div>
-        <div id="pm_${m.id}" class="hidden" style="margin-top:.4rem">
-          <div class="row">
-            <select id="pm_prov_${m.id}" style="flex:1.4">${providerOptions(m.payout_provider)}</select>
-            <input id="pm_acct_${m.id}" placeholder="MoMo / account no." value="${esc(m.payout_account||m.phone||'')}" style="flex:1.3">
-          </div>
-          <input id="pm_name_${m.id}" placeholder="Account name" value="${esc(m.name)}" style="margin-top:.3rem">
-          <div style="margin-top:.4rem"><button class="btn sm green" onclick="savePayout(${g.id},${m.id})">Save method</button></div>
-        </div>
-      </td>
-      <td class="center">${isDraft?`<button class="btn red sm" onclick="delMember(${g.id},${m.id})">Remove</button>`:''}</td>
-    </tr>`).join('');
-
-  const cycleRows = d.cycles.map(c=>{
-    const cur = c.idx===g.current_cycle && isActive;
-    const fundbar = `${c.locked}/${c.total} paid`;
-    return `<tr style="${cur?'background:var(--accent-soft)':''}">
-      <td>${c.idx}${cur?' ◀ current':''}</td>
-      <td><strong>${esc(c.recipient_name)}</strong></td>
-      <td>${fmt(c.pot_minor)}</td>
-      <td><span class="pill ${c.status==='paid_out'?'released':(c.locked===c.total?'locked':'due')}">${c.status==='paid_out'?'paid out':(c.locked===c.total?'funded':fundbar)}</span></td>
-      <td class="small muted">${c.due_date||''}</td>
-    </tr>`;
-  }).join('');
-
-  const current = d.cycles.find(c=>c.idx===g.current_cycle);
-  const fundedNow = current && current.locked===current.total && current.status!=='paid_out';
-  const outstanding = current ? current.due_members : [];
-
-  document.getElementById('detail').innerHTML = `
-    <div class="row" style="justify-content:space-between;margin-top:.6rem">
-      <h2 style="margin:0">${esc(g.name)}</h2><span class="pill ${g.status}">${g.status}</span></div>
-    <div class="small muted">${fmt(g.contribution_minor)} per turn · ${g.frequency} · payout order: ${g.rotation==='random'?'random draw':'order added'}</div>
-
-    <div class="grid cols-2" style="margin-top:1rem">
-      <div class="card">
-        <div class="row" style="justify-content:space-between"><h3 style="margin:0">Members</h3>
-          <span class="small muted">${d.members.length} of ${ME.members_per_group}</span></div>
-        ${isDraft?`<div class="row" style="margin:.6rem 0">
-          <input id="m_name" placeholder="Member name" style="flex:2">
-          <input id="m_phone" placeholder="Phone" style="flex:1.4">
-          <button class="btn sm" onclick="addMember(${g.id})">Add</button></div>`:''}
-        <table><tbody>${memberRows||'<tr><td class="muted">No members yet</td></tr>'}</tbody></table>
-        ${isDraft?`<div class="divider"></div>
-          <button class="btn green" onclick="startGroup(${g.id})" ${d.members.length<2?'disabled':''}>Start susu (${d.members.length} members)</button>
-          <div class="small muted" style="margin-top:.3rem">Starting locks the member list and builds the rotation.</div>
-          <button class="btn red sm" style="margin-top:.6rem" onclick="deleteGroup(${g.id})">Delete this group</button>`:''}
-      </div>
-
-      <div class="card">
-        <h3 style="margin-top:0">Rotation</h3>
-        ${g.status==='draft'?'<p class="muted small">Turns appear once you start the susu.</p>':`
-          <table><thead><tr><th>Turn</th><th>Receives</th><th>Pot</th><th>Status</th><th>Due</th></tr></thead>
-          <tbody>${cycleRows}</tbody></table>`}
-        ${isActive?`
-          <div class="divider"></div>
-          ${outstanding.length?`<div class="note">Waiting on: ${outstanding.map(o=>esc(o.name)+(o.status==='defaulted'?' (failed)':'')).join(', ')}</div>`:''}
-          <div class="row" style="margin-top:.6rem">
-            <button class="btn ghost" onclick="collect(${g.id})">Auto-charge unpaid</button>
-            <button class="btn green" onclick="payout(${g.id})" ${fundedNow?'':'disabled'}>Pay out turn ${g.current_cycle}</button>
-          </div>
-          <div class="small muted" style="margin-top:.3rem">Pay out is enabled once every member's contribution for this turn is locked.</div>`:''}
-        ${g.status==='completed'?'<div class="note" style="margin-top:.7rem">This susu has completed — everyone has received their turn.</div>':''}
-      </div>
+/* ---- Students ---- */
+async function renderStudents(v){
+  await refreshCache();
+  const {students}=await api('/api/admin/students');CACHE.students=students;
+  v.innerHTML=`<div class="card"><h3>Enroll a student</h3>
+    <div class="grid cols-2">
+      <div><label>Student name</label><input id="s_name"></div>
+      <div><label>Class</label><select id="s_class">${opt(CACHE.classes,'id','name')}</select></div>
+      <div><label>Grade</label><input id="s_grade" placeholder="JHS 1"></div>
+      <div><label>Section</label><input id="s_section" placeholder="A"></div>
+      <div><label>Student email (optional)</label><input id="s_email" type="email"></div>
+      <div><label>Student phone (optional)</label><input id="s_phone"></div>
     </div>
+    <div class="divider"></div><div class="small muted">Optional parent/guardian (gets their own login + fee alerts)</div>
+    <div class="grid cols-3">
+      <div><label>Parent name</label><input id="p_name"></div>
+      <div><label>Parent email</label><input id="p_email" type="email"></div>
+      <div><label>Parent phone</label><input id="p_phone"></div>
+    </div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addStudent()">Enroll & create login</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem">
+      <table><thead><tr><th>Name</th><th>Adm. no</th><th>Class</th><th>Login</th><th>Parent</th><th></th></tr></thead>
+      <tbody>${students.map(s=>`<tr><td><strong>${esc(s.name)}</strong></td><td class="small">${esc(s.admission_no||'')}</td>
+        <td>${esc(s.class_name||'—')}</td><td class="small">${esc(s.login_id)}</td><td class="small">${esc(s.parent_name||'—')}</td>
+        <td><button class="btn ghost sm" onclick="reportCard(${s.id})">Report card</button></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No students yet</td></tr>'}</tbody></table></div>`;
+}
+async function addStudent(){
+  try{const r=await api('/api/admin/students',{method:'POST',body:JSON.stringify({
+    name:s_name.value,email:s_email.value,phone:s_phone.value,class_id:s_class.value||null,grade:s_grade.value,section:s_section.value,
+    parent_name:p_name.value,parent_email:p_email.value,parent_phone:p_phone.value})});
+    let msg=`✅ <b>${esc(s_name.value)}</b> enrolled. Student login: <span class="cred">${r.student_login}</span> password <span class="cred">${r.student_password}</span>`;
+    if(r.parent_login)msg+=`<br>Parent login: <span class="cred">${r.parent_login}</span> password <span class="cred">${r.parent_password}</span>`;
+    showCred(msg);loadStats();render();}catch(e){toast(e.message);}
+}
+/* ---- Teachers ---- */
+async function renderTeachers(v){
+  const {teachers}=await api('/api/admin/teachers');CACHE.teachers=teachers;
+  v.innerHTML=`<div class="card"><h3>Add a teacher</h3><div class="grid cols-2">
+    <div><label>Name</label><input id="t_name"></div><div><label>Subjects</label><input id="t_sub" placeholder="Maths, Science"></div>
+    <div><label>Email (optional)</label><input id="t_email" type="email"></div><div><label>Phone (optional)</label><input id="t_phone"></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addTeacher()">Add & create login</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><table><thead><tr><th>Name</th><th>Subjects</th><th>Login</th><th>Contact</th></tr></thead>
+    <tbody>${teachers.map(t=>`<tr><td><strong>${esc(t.name)}</strong></td><td>${esc(t.subjects||'')}</td><td class="small">${esc(t.login_id)}</td>
+      <td class="small muted">${esc(t.email||t.phone||'')}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No teachers yet</td></tr>'}</tbody></table></div>`;
+}
+async function addTeacher(){
+  try{const r=await api('/api/admin/teachers',{method:'POST',body:JSON.stringify({name:t_name.value,subjects:t_sub.value,email:t_email.value,phone:t_phone.value})});
+    showCred(`✅ Teacher <b>${esc(t_name.value)}</b> added. Login: <span class="cred">${r.login_id}</span> password <span class="cred">${r.password}</span>`);loadStats();render();}catch(e){toast(e.message);}
+}
+/* ---- Classes ---- */
+async function renderClasses(v){
+  await refreshCache();const {classes}=await api('/api/admin/classes');
+  v.innerHTML=`<div class="card"><h3>Add a class</h3><div class="grid cols-3">
+    <div><label>Name</label><input id="c_name" placeholder="JHS 1"></div><div><label>Section</label><input id="c_section" placeholder="A"></div>
+    <div><label>Class teacher</label><select id="c_teacher">${opt(CACHE.teachers,'id','name')}</select></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addClass()">Add class</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><table><thead><tr><th>Class</th><th>Section</th><th>Teacher</th><th>Students</th></tr></thead>
+    <tbody>${classes.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.section||'')}</td><td>${esc(c.teacher_name||'—')}</td><td>${c.students}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No classes</td></tr>'}</tbody></table></div>`;
+}
+async function addClass(){try{await api('/api/admin/classes',{method:'POST',body:JSON.stringify({name:c_name.value,section:c_section.value,teacher_id:c_teacher.value||null})});toast('Class added');loadStats();render();}catch(e){toast(e.message);}}
+/* ---- Courses ---- */
+async function renderCourses(v){
+  await refreshCache();const {courses}=await api('/api/admin/courses');
+  v.innerHTML=`<div class="card"><h3>Add a course</h3><div class="grid cols-2">
+    <div><label>Course name</label><input id="co_name" placeholder="Mathematics"></div><div><label>Code</label><input id="co_code" placeholder="MATH"></div>
+    <div><label>Class</label><select id="co_class">${opt(CACHE.classes,'id','name')}</select></div>
+    <div><label>Teacher</label><select id="co_teacher">${opt(CACHE.teachers,'id','name')}</select></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addCourse()">Add course</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><table><thead><tr><th>Course</th><th>Code</th><th>Class</th><th>Teacher</th></tr></thead>
+    <tbody>${courses.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.code||'')}</td><td>${esc(c.class_name||'—')}</td><td>${esc(c.teacher_name||'—')}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No courses</td></tr>'}</tbody></table></div>`;
+}
+async function addCourse(){try{await api('/api/admin/courses',{method:'POST',body:JSON.stringify({name:co_name.value,code:co_code.value,class_id:co_class.value||null,teacher_id:co_teacher.value||null})});toast('Course added');render();}catch(e){toast(e.message);}}
+/* ---- Timetable ---- */
+async function renderTimetable(v){
+  await refreshCache();
+  v.innerHTML=`<div class="card"><div class="row"><label style="margin:0">Class</label>
+    <select id="tt_class" onchange="loadTT()" style="max-width:200px">${opt(CACHE.classes,'id','name')}</select></div>
+    <div id="ttGrid" style="margin-top:.8rem"></div></div>`;
+}
+async function loadTT(){
+  const cid=tt_class.value;if(!cid){document.getElementById('ttGrid').innerHTML='';return;}
+  const {slots}=await api('/api/admin/timetable?class_id='+cid);
+  const courses=(await api('/api/admin/courses')).courses.filter(c=>c.class_id==cid);
+  const byKey={};slots.forEach(s=>byKey[s.day+'-'+s.period]=s);
+  let grid='<div class="tt-grid"><div class="hd">Period</div>'+DAYS.slice(1).map(d=>`<div class="hd">${d}</div>`).join('');
+  for(let pr=1;pr<=6;pr++){grid+=`<div class="hd">P${pr}</div>`;for(let d=1;d<=5;d++){const s=byKey[d+'-'+pr];grid+=`<div>${s?esc(s.course_name||'—'):'·'}</div>`;}}
+  grid+='</div>';
+  grid+=`<div class="divider"></div><div class="grid cols-3">
+    <div><label>Day</label><select id="tt_day">${[1,2,3,4,5].map(d=>`<option value="${d}">${DAYS[d]}</option>`).join('')}</select></div>
+    <div><label>Period</label><select id="tt_period">${[1,2,3,4,5,6].map(p=>`<option value="${p}">P${p}</option>`).join('')}</select></div>
+    <div><label>Course</label><select id="tt_course">${opt(courses,'id','name')}</select></div></div>
+    <div class="row" style="margin-top:.5rem"><input id="tt_start" placeholder="08:00" style="max-width:110px"><input id="tt_end" placeholder="08:45" style="max-width:110px">
+    <button class="btn sm green" onclick="addSlot()">Add slot</button></div>`;
+  document.getElementById('ttGrid').innerHTML=grid;
+}
+async function addSlot(){try{await api('/api/admin/timetable',{method:'POST',body:JSON.stringify({class_id:tt_class.value,day:tt_day.value,period:tt_period.value,course_id:tt_course.value||null,start_time:tt_start.value,end_time:tt_end.value})});toast('Slot added');loadTT();}catch(e){toast(e.message);}}
+/* ---- Exams ---- */
+async function renderExams(v){
+  await refreshCache();const {exams}=await api('/api/admin/exams');
+  v.innerHTML=`<div class="card"><h3>Create an exam</h3><div class="grid cols-3">
+    <div><label>Name</label><input id="e_name" placeholder="End of Term 1"></div><div><label>Term</label><input id="e_term" placeholder="Term 1"></div>
+    <div><label>Class</label><select id="e_class">${opt(CACHE.classes,'id','name')}</select></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addExam()">Create exam</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><table><thead><tr><th>Exam</th><th>Term</th><th>Class</th></tr></thead>
+    <tbody>${exams.map(e=>`<tr><td><strong>${esc(e.name)}</strong></td><td>${esc(e.term||'')}</td><td>${esc(e.class_name||'—')}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">No exams</td></tr>'}</tbody></table></div>`;
+}
+async function addExam(){try{await api('/api/admin/exams',{method:'POST',body:JSON.stringify({name:e_name.value,term:e_term.value,class_id:e_class.value||null})});toast('Exam created');render();}catch(e){toast(e.message);}}
+/* ---- Invoices ---- */
+async function renderInvoices(v){
+  if(!CACHE.students.length)CACHE.students=(await api('/api/admin/students')).students;
+  const {invoices,currency}=await api('/api/admin/invoices');CUR=currency==='NGN'?'₦':'₵';
+  v.innerHTML=`<div class="card"><h3>Create a fee invoice</h3><div class="grid cols-2">
+    <div><label>Student</label><select id="i_student">${opt(CACHE.students,'id','name')}</select></div>
+    <div><label>Amount (${CUR})</label><input id="i_amount" type="number" min="1"></div>
+    <div><label>Title</label><input id="i_title" placeholder="Term 1 fees"></div>
+    <div><label>Term</label><input id="i_term" placeholder="Term 1"></div>
+    <div><label>Due date</label><input id="i_due" type="date"></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addInvoice()">Create invoice</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><table><thead><tr><th>Student</th><th>Title</th><th>Due</th><th>Paid</th><th>Status</th></tr></thead>
+    <tbody>${invoices.map(i=>`<tr><td><strong>${esc(i.student_name)}</strong><div class="small muted">${esc(i.admission_no||'')}</div></td>
+      <td>${esc(i.title||'')}</td><td>${fmt(i.amount_due_minor)}</td><td>${fmt(i.amount_paid_minor)}</td>
+      <td><span class="pill ${i.status==='paid'?'released':i.status==='partial'?'locked':'due'}">${i.status}</span></td></tr>`).join('')||'<tr><td colspan="5" class="muted">No invoices</td></tr>'}</tbody></table></div>`;
+}
+async function addInvoice(){try{await api('/api/admin/invoices',{method:'POST',body:JSON.stringify({student_id:i_student.value,amount:i_amount.value,title:i_title.value,term:i_term.value,due_date:i_due.value})});toast('Invoice created — parent notified');loadStats();render();}catch(e){toast(e.message);}}
 
-    ${d.payouts.length?`<div class="card" style="margin-top:.9rem"><h3 style="margin-top:0">Payout history</h3>
-      <table><thead><tr><th>Turn</th><th>Recipient</th><th>Amount</th><th>Transfer</th><th></th></tr></thead><tbody>
-      ${d.payouts.map((p,i)=>`<tr>
-        <td>${i+1}</td><td>${esc(p.recipient_name)}</td><td><strong>${fmt(p.amount_minor)}</strong></td>
-        <td><span class="pill ${transferPill(p.transfer_status)}">${transferLabel(p.transfer_status)}</span></td>
-        <td>${p.transfer_status!=='success'?`<button class="btn ghost sm" onclick="sendTransfer(${g.id},${p.id})">Send payout</button>`:''}</td>
-      </tr>`).join('')}
-      </tbody></table>
-      <div class="small muted" style="margin-top:.4rem">Transfers draw from your settled Paystack balance. Disable Transfers OTP in Paystack to send automatically.</div></div>`:''}
-  `;
+/* ---- printable report card ---- */
+async function reportCard(sid){
+  try{const d=await api('/api/report/'+sid);
+    const rows=d.results.map(r=>`<tr><td>${esc(r.course||'')}</td><td>${esc(r.exam||'')}</td><td>${r.score}/${r.max_score}</td><td>${esc(r.grade||'')}</td></tr>`).join('')||'<tr><td colspan="4">No results yet</td></tr>';
+    const att=d.attendance;const tot=att.present+att.absent+att.late;
+    const w=window.open('','_blank');
+    w.document.write(`<html><head><title>Report card — ${esc(d.student.name)}</title>
+      <style>body{font-family:sans-serif;max-width:680px;margin:24px auto;color:#1a1712}h1{color:#d99b16}
+      table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #e2d6bd;padding:8px;text-align:left}
+      .head{display:flex;justify-content:space-between;border-bottom:3px solid #171410;padding-bottom:8px}</style></head>
+      <body><div class="head"><div><h1>${esc(d.school.name)}</h1><div>Report Card</div></div>
+      <div style="text-align:right"><div><b>${esc(d.student.name)}</b></div><div>${esc(d.student.admission_no||'')}</div><div>${esc(d.student.class_name||'')}</div></div></div>
+      <table><thead><tr><th>Course</th><th>Exam</th><th>Score</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table>
+      <p style="margin-top:14px">Attendance: <b>${att.present}</b> present, <b>${att.absent}</b> absent, <b>${att.late}</b> late${tot?` (${Math.round(att.present/tot*100)}% present)`:''}.</p>
+      <p style="color:#777;font-size:12px">Generated by HaloSchool</p>
+      <script>window.print()<\/script>
+</body></html>`);w.document.close();
+  }catch(e){toast(e.message);}
 }
-function copyLink(u){ navigator.clipboard.writeText(u).then(()=>toast('Link copied')); }
-async function addMember(id){
-  try{ const r = await api(`/api/groups/${id}/members`,{method:'POST',body:JSON.stringify({name:m_name.value,phone:m_phone.value})});
-    toast('Member added'); renderDetail(await api('/api/groups/'+id)); }catch(e){ toast(e.message); }
-}
-async function delMember(gid,mid){
-  try{ await api(`/api/groups/${gid}/members/${mid}`,{method:'DELETE'}); renderDetail(await api('/api/groups/'+gid)); }catch(e){ toast(e.message); }
-}
-async function startGroup(id){
-  if(!confirm('Start the susu? Members can no longer be changed.')) return;
-  try{ await api(`/api/groups/${id}/start`,{method:'POST'}); toast('Susu started'); renderDetail(await api('/api/groups/'+id)); }catch(e){ toast(e.message); }
-}
-async function deleteGroup(id){
-  if(!confirm('Delete this draft group? This cannot be undone.')) return;
-  try{ await api('/api/groups/'+id,{method:'DELETE'}); toast('Group deleted'); backToList(); }catch(e){ toast(e.message); }
-}
-async function collect(id){
-  try{ const r = await api(`/api/groups/${id}/collect`,{method:'POST'}); toast(r.message); renderDetail(await api('/api/groups/'+id)); }catch(e){ toast(e.message); }
-}
-async function payout(id){
-  if(!confirm("Release this turn's pot to the recipient and send the transfer?")) return;
-  try{ const r = await api(`/api/groups/${id}/payout`,{method:'POST'}); toast('Turn '+r.paid_cycle+' — '+(r.message||'paid out')); renderDetail(await api('/api/groups/'+id)); }catch(e){ toast(e.message); }
-}
-/* ---------- disbursement (Paystack Transfers) ---------- */
-let PROVIDERS=[];
-async function loadProviders(){ try{ PROVIDERS=(await api('/api/momo-providers')).providers||[]; }catch{ PROVIDERS=[]; } }
-function providerOptions(sel){
-  if(!PROVIDERS.length) return '<option value="">— set Paystack keys —</option>';
-  return ['<option value="">Provider…</option>'].concat(
-    PROVIDERS.map(p=>`<option value="${esc(p.code)}" ${p.code===sel?'selected':''}>${esc(p.name)}</option>`)).join('');
-}
-function togglePayout(mid){ document.getElementById('pm_'+mid).classList.toggle('hidden'); }
-async function savePayout(gid,mid){
-  const provider=(document.getElementById('pm_prov_'+mid)||{}).value||'';
-  const account=(document.getElementById('pm_acct_'+mid)||{}).value||'';
-  const name=(document.getElementById('pm_name_'+mid)||{}).value||'';
-  if(!provider||!account){ toast('Pick a provider and enter the number'); return; }
-  try{ await api(`/api/groups/${gid}/members/${mid}/payout-method`,{method:'POST',
-      body:JSON.stringify({provider,account,name})}); toast('Payout method saved'); renderDetail(await api('/api/groups/'+gid)); }
-  catch(e){ toast(e.message); }
-}
-async function sendTransfer(gid,pid){
-  try{ const r=await api(`/api/groups/${gid}/payouts/${pid}/transfer`,{method:'POST'}); toast(r.message||'Transfer attempted'); renderDetail(await api('/api/groups/'+gid)); }
-  catch(e){ toast(e.message); }
-}
-function transferPill(s){ return {success:'released',pending:'locked',otp_required:'due',no_method:'due',failed:'defaulted',reversed:'defaulted'}[s]||'due'; }
-function transferLabel(s){ return {success:'sent',pending:'processing',otp_required:'needs OTP',no_method:'no method',failed:'failed',reversed:'reversed'}[s]||'pending'; }
-
-(async()=>{ if(await guard()){ loadProviders(); maybeGate(); } })();
+(async()=>{if(await guard()){document.getElementById('app').classList.remove('hidden');loadStats();render();}})();
 </script>
-<script>
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", function () { navigator.serviceWorker.register("/sw.js").catch(function(){}); });
-}
-</script>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});}</script>
 </body>
 </html>

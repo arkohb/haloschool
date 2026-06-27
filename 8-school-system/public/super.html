@@ -47,7 +47,7 @@ function logout(){localStorage.clear();location.href='/';}
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt=m=>'₵'+(Number(m||0)/100).toLocaleString();
 let DATA={schools:[]},F='all';
-async function guard(){if(!token){location.href='/';return false;}try{const me=await api('/api/me');if(me.role!=='super'){location.href='/';return false;}return true;}catch{location.href='/';return false;}}
+async function guard(){if(!token){location.href='/';return false;}try{const me=await api('/api/me');if(me.role!=='super'){location.href='/';return false;}return true;}catch{localStorage.clear();location.href='/';return false;}}
 function setF(f){F=f;document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.f===f));rows();}
 async function load(){
   const d=await api('/api/super/overview');DATA=d;const c=d.counts;

@@ -35,8 +35,8 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
 function logout(){localStorage.clear();location.href='/';}
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const gradeClass=g=>'grade'+(g||'F');let ME=null,CURSID=null;
-async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{location.href='/';return false;}
-  if(ME.role!=='parent'){location.href='/';return false;}if(ME.must_change_pw){location.href='/';return false;}
+async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{localStorage.clear();location.href='/';return false;}
+  if(ME.role!=='parent'){localStorage.clear();location.href='/';return false;}if(ME.must_change_pw){location.href='/';return false;}
   document.getElementById('who').textContent=ME.name;return true;}
 async function loadKids(){
   const {children}=await api('/api/parent/children');
@@ -86,10 +86,11 @@ async function reportCard(sid){
     <body><div class="head"><div><h1>${esc(d.school.name)}</h1><div>Report Card</div></div><div style="text-align:right"><b>${esc(d.student.name)}</b><div>${esc(d.student.admission_no||'')}</div><div>${esc(d.student.class_name||'')}</div></div></div>
     <table><thead><tr><th>Course</th><th>Exam</th><th>Score</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table>
     <p style="margin-top:14px">Attendance: <b>${att.present}</b> present, <b>${att.absent}</b> absent, <b>${att.late}</b> late${tot?` (${Math.round(att.present/tot*100)}%)`:''}.</p>
-    <script>window.print()<\/script><script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});}</script>
+    <script>window.print()<\/script>
 </body></html>`);w.document.close();
 }
 (async()=>{if(await guard()){document.getElementById('app').classList.remove('hidden');loadKids();}})();
 </script>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});}</script>
 </body>
 </html>
