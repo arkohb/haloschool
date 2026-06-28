@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HaloSchool — Student</title>
+<link rel="stylesheet" href="app.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#171410">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="HaloSchool">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Halo<span>School</span> 🎓</div>
+  <span class="who" id="who"></span>
+  <div class="spacer"></div>
+  <button class="btn ghost sm" style="color:#fdf6e6;border-color:#4a443a" onclick="logout()">Sign out</button>
+</header>
+<div class="wrap" id="app" class="hidden"><div id="notices"></div><div id="view"></div></div>
+<div id="toast" class="toast hidden"></div>
+<script src="/report.js"></script>
+<script>
+const token=localStorage.getItem('school_token');
+const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+const api=(p,o={})=>fetch(p,{...o,headers:{...H,...(o.headers||{})}}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'error');return d;});
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.add('hidden'),3500);}
+function logout(){localStorage.clear();location.href='/';}
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const DAYS=['','Mon','Tue','Wed','Thu','Fri'];let ME=null,SID=null;
+const gradeClass=g=>'grade'+(g||'F');
+async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{localStorage.clear();location.href='/';return false;}
+  if(ME.role!=='student'){localStorage.clear();location.href='/';return false;}if(ME.must_change_pw){location.href='/';return false;}
+  document.getElementById('who').textContent=ME.name;return true;}
+function ttGrid(slots){
+  const byKey={};slots.forEach(s=>byKey[s.day+'-'+s.period]=s);
+  let g='<div class="tt-grid"><div class="hd">P</div>'+DAYS.slice(1).map(d=>`<div class="hd">${d}</div>`).join('');
+  for(let pr=1;pr<=6;pr++){g+=`<div class="hd">${pr}</div>`;for(let d=1;d<=5;d++){const s=byKey[d+'-'+pr];g+=`<div>${s?esc(s.course||'—'):'·'}</div>`;}}
+  return g+'</div>';
+}
+async function load(){
+  const d=await api('/api/student/me');SID=d.student.id;
+  const att=d.attendance,tot=att.present+att.absent+att.late;
+  const results=d.results.map(r=>`<tr><td>${esc(r.course||'')}</td><td>${esc(r.exam||'')}</td><td>${r.score}/${r.max_score}</td><td class="${gradeClass(r.grade)}">${esc(r.grade||'')}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No marks yet</td></tr>';
+  const cur=d.currency==='NGN'?'₦':'₵';
+  const inv=d.invoices.map(i=>`<tr><td>${esc(i.title||'')}</td><td>${cur}${(i.amount_due_minor/100).toLocaleString()}</td>
+    <td><span class="pill ${i.status==='paid'?'released':i.status==='partial'?'locked':'due'}">${i.status}</span></td></tr>`).join('')||'<tr><td colspan="3" class="muted">No invoices</td></tr>';
+  document.getElementById('view').innerHTML=`
+    <div class="card"><h2 style="margin-top:0">${esc(d.student.name)}</h2>
+      <div class="small muted">${esc(d.student.class_name||'')} · ${esc(d.student.admission_no||'')}</div>
+      <button class="btn ghost sm" style="margin-top:.5rem" onclick="reportCard()">Print report card</button></div>
+    <div class="grid cols-3" style="margin-top:.9rem">
+      <div class="stat"><div class="k">Present</div><div class="v" style="color:var(--k-green)">${att.present}</div></div>
+      <div class="stat"><div class="k">Absent</div><div class="v" style="color:var(--bad)">${att.absent}</div></div>
+      <div class="stat"><div class="k">Attendance</div><div class="v">${tot?Math.round(att.present/tot*100):0}%</div></div>
+    </div>
+    <div class="card" style="margin-top:.9rem"><h3>Timetable</h3>${d.timetable.length?ttGrid(d.timetable):'<p class="muted">No timetable set.</p>'}</div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><h3 style="padding:.4rem">Marks</h3>
+      <table><thead><tr><th>Course</th><th>Exam</th><th>Score</th><th>Grade</th></tr></thead><tbody>${results}</tbody></table></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><h3 style="padding:.4rem">Assignments</h3>
+      <div id="assignSec"><p class="muted small" style="padding:.4rem">Loading...</p></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><h3 style="padding:.4rem">Fees</h3>
+      <table><thead><tr><th>Title</th><th>Amount</th><th>Status</th></tr></thead><tbody>${inv}</tbody></table></div>`;
+  loadAssignments();
+}
+async function loadAssignments(){try{
+  const {assignments}=await api('/api/student/assignments');
+  const el=document.getElementById('assignSec');
+  if(!assignments.length){el.innerHTML='<p class="muted small" style="padding:.4rem">No active assignments.</p>';return;}
+  el.innerHTML=`<table><thead><tr><th>Assignment</th><th>Due</th><th>Status</th></tr></thead><tbody>${assignments.map(a=>{
+    const due=a.due_date?new Date(a.due_date+'T00:00Z').toLocaleDateString():'—';
+    const due_class=a.due_date&&new Date(a.due_date)<new Date()?'style="color:var(--bad)"':'';
+    const status=a.submitted_at?`<span class="pill released">Submitted ${new Date(a.submitted_at).toLocaleDateString()}</span>`:a.grade!=null?`<span class="pill locked">Graded: ${a.grade}</span>`:'<span class="pill">Pending</span>';
+    return `<tr><td><strong>${esc(a.title)}</strong><br><span class="small muted">${esc(a.course)}</span></td><td ${due_class}>${due}</td><td>${status}</td></tr>`;
+  }).join('')}</tbody></table>`;
+}catch(e){}}
+async function reportCard(){try{const d=await api('/api/report/'+SID);printReportCard(d);}catch(e){toast(e.message);}}
+async function loadNotices(){try{const {announcements}=await api('/api/announcements');const el=document.getElementById('notices');if(!el)return;
+  if(!announcements.length){el.innerHTML='';return;}
+  el.innerHTML=`<div class="card" style="margin-bottom:1rem"><h3 style="margin-top:0">📣 Announcements</h3>${announcements.slice(0,6).map(a=>`<div style="border-bottom:1px solid var(--line);padding:.5rem 0">
+    <strong>${esc(a.title)}</strong><div class="small" style="white-space:pre-wrap;margin:.15rem 0">${esc(a.body||'')}</div>
+    <div class="small muted">${new Date((a.created_at||'').replace(' ','T')+'Z').toLocaleDateString()}</div></div>`).join('')}</div>`;
+}catch(e){}}
+(async()=>{if(await guard()){document.getElementById('app').classList.remove('hidden');loadNotices();load();}})();
+</script>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});}</script>
+</body>
+</html>
