@@ -71,12 +71,17 @@ function securityHeaders(res) {
   res.setHeader("Content-Security-Policy", CSP);
 }
 function applyCors(req, res) {
-  const origin = req.headers.origin; // same-origin needs no CORS; only allowlisted cross-origin gets a header
+  const origin = req.headers.origin;
+  // IMPORTANT: Always allow authorization and content-type headers
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "authorization,content-type");
+  
+  // If there's an origin, set CORS headers
   if (origin && ALLOWED_ORIGINS.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "authorization,content-type");
+  }
+}
   }
 }
 /* ============================================================== */
