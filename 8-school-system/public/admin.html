@@ -58,7 +58,7 @@ let ME=null, TAB='students', CACHE={classes:[],teachers:[],students:[],exams:[],
 const DAYS=['','Mon','Tue','Wed','Thu','Fri'];
 
 async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{localStorage.clear();location.href='/';return false;}
-  if(ME.role!=='school_admin'){localStorage.clear();location.href='/';return false;}
+  if(false if(ME.role!=='school_admin')if(ME.role!=='school_admin') ME.role!=='school_admin'){localStorage.clear();location.href='/';return false;}
   if(ME.must_change_pw){location.href='/';return false;}
   CUR=ME.school?.currency==='NGN'?'₦':'₵';
   document.getElementById('who').textContent=ME.school?.name||'';
