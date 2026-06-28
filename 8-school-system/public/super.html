@@ -16,6 +16,7 @@
 </head>
 <body>
 <header class="bar">
+  <button class="btn ghost sm hidden" id="backBtn" style="color:#fdf6e6;border-color:#4a443a;margin-right:.4rem" onclick="goBack()">← Back</button>
   <div class="brand">Halo<span>School</span> 🎓</div>
   <span class="who">Platform admin</span>
   <div class="spacer"></div>
@@ -48,7 +49,9 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;',
 const fmt=m=>'₵'+(Number(m||0)/100).toLocaleString();
 let DATA={schools:[]},F='all';
 async function guard(){if(!token){location.href='/';return false;}try{const me=await api('/api/me');if(me.role!=='super'){location.href='/';return false;}return true;}catch{localStorage.clear();location.href='/';return false;}}
-function setF(f){F=f;document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.f===f));rows();}
+let FHIST=[];
+function setF(f,fromBack){if(!fromBack&&F&&F!==f)FHIST.push(F);F=f;document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.f===f));const b=document.getElementById('backBtn');if(b)b.classList.toggle('hidden',FHIST.length===0);rows();}
+function goBack(){if(FHIST.length){setF(FHIST.pop(),true);}}
 async function load(){
   const d=await api('/api/super/overview');DATA=d;const c=d.counts;
   document.getElementById('stats').innerHTML=`

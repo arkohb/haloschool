@@ -16,6 +16,7 @@
 </head>
 <body>
 <header class="bar">
+  <button class="btn ghost sm hidden" id="backBtn" style="color:#fdf6e6;border-color:#4a443a;margin-right:.4rem" onclick="goBack()">← Back</button>
   <div class="brand">Halo<span>School</span> 🎓</div>
   <span class="who" id="who"></span>
   <div class="spacer"></div>
@@ -24,8 +25,11 @@
 
 <div class="wrap" id="app" class="hidden">
   <div class="tabs">
-    <div class="tab on" data-t="att" onclick="go('att')">✅ Attendance</div>
+    <div class="tab on" data-t="classes" onclick="go('classes')">🏫 My Classes</div>
+    <div class="tab" data-t="msg" onclick="go('msg')">💬 Messages</div>
+    <div class="tab" data-t="att" onclick="go('att')">✅ Attendance</div>
     <div class="tab" data-t="marks" onclick="go('marks')">📝 Marks</div>
+    <div class="tab" data-t="assign" onclick="go('assign')">📚 Assignments</div>
   </div>
   <div id="view"></div>
 </div>
@@ -44,9 +48,115 @@ const opt=(list,val,label)=>'<option value="">—</option>'+list.map(x=>`<option
 async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{localStorage.clear();location.href='/';return false;}
   if(ME.role!=='teacher'){localStorage.clear();location.href='/';return false;}if(ME.must_change_pw){location.href='/';return false;}
   document.getElementById('who').textContent=ME.name;MY=await api('/api/teacher/classes');return true;}
-function go(t){TAB=t;document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));render();}
-function render(){TAB==='att'?renderAtt():renderMarks();}
+let NAVHIST=[];
+function go(t,fromBack){if(!fromBack&&TAB&&TAB!==t)NAVHIST.push(TAB);TAB=t;document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));updateBack();render();}
+function goBack(){if(NAVHIST.length){go(NAVHIST.pop(),true);}}
+function updateBack(){const b=document.getElementById('backBtn');if(b)b.classList.toggle('hidden',NAVHIST.length===0);}
+function render(){TAB==='classes'?renderClasses():TAB==='msg'?renderMsg():TAB==='att'?renderAtt():TAB==='assign'?renderAssign():renderMarks();}
 
+function renderClasses(){
+  const classes=MY.classes||[];const courses=MY.courses||[];
+  document.getElementById('view').innerHTML=`<div class="card"><h3>Your Teaching Assignments</h3>
+    ${classes.length?`<div><h4>Class Teaching</h4><table><thead><tr><th>Class</th><th>Students</th></tr></thead><tbody>
+    ${classes.map(cl=>`<tr><td><strong>${esc(cl.name)}</strong></td><td>${cl.students||0}</td></tr>`).join('')}
+    </tbody></table></div>`:'<p class="muted">You are not assigned as a class teacher.</p>'}
+    <div style="margin-top:1rem"><h4>Courses</h4>${courses.length?`<table><thead><tr><th>Course</th><th>Class</th></tr></thead><tbody>
+    ${courses.map(co=>`<tr><td><strong>${esc(co.name)}</strong> ${co.code?'('+esc(co.code)+')':''}</td><td>${esc(co.class_name||'—')}</td></tr>`).join('')}
+    </tbody></table>`:'<p class="muted">No courses assigned.</p>'}</div></div>`;
+}
+async function renderMsg(){
+  const {conversations}=await api('/api/messages');CACHE.conversations=conversations||[];
+  document.getElementById('view').innerHTML=`<div class="card" style="display:grid;grid-template-columns:1fr 2fr;gap:1rem">
+    <div style="border-right:1px solid var(--line)">
+      <h4>Conversations</h4>
+      <div id="convList" style="max-height:600px;overflow-y:auto"></div>
+    </div>
+    <div>
+      <div id="msgThread" style="display:none">
+        <h4 id="threadTitle"></h4>
+        <div id="msgView" style="border:1px solid var(--line);border-radius:8px;padding:1rem;height:400px;overflow-y:auto;margin-bottom:1rem;background:var(--bg-3)"></div>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:.5rem">
+          <textarea id="msgBody" placeholder="Type message..." rows="2" style="width:100%;font:inherit;padding:.5rem;border:1px solid var(--line);border-radius:8px;background:white"></textarea>
+          <button class="btn green" onclick="sendMsg()" style="height:fit-content">Send</button>
+        </div>
+      </div>
+      <div id="noMsg" style="text-align:center;color:var(--muted)">Select a conversation to start</div>
+    </div>
+  </div>`;
+  document.getElementById('convList').innerHTML=(conversations.length?conversations.map((c,i)=>`
+    <div class="msg-conv" onclick="openConv(${i})" style="padding:.75rem;border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px;margin-bottom:.5rem;background:var(--bg-2)" id="conv_${i}">
+      <strong>${esc(c.other_name)}</strong>
+      ${c.unread?`<span style="float:right;background:#c0392b;color:white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:12px">${c.unread}</span>`:''}
+      <br><span class="small muted">${c.messages[c.messages.length-1]?.body?.substring(0,40)||'...'}...</span>
+      <br><span class="small muted">${new Date(c.latest).toLocaleDateString()}</span>
+    </div>
+  `).join(''):'<p class="muted">No conversations yet</p>');
+}
+let CURRENT_CONV=null;
+async function openConv(i){
+  CURRENT_CONV=CACHE.conversations[i];
+  const {messages}=await api('/api/messages/'+CURRENT_CONV.other_id);
+  document.getElementById('noMsg').style.display='none';
+  document.getElementById('msgThread').style.display='block';
+  document.getElementById('threadTitle').textContent=CURRENT_CONV.other_name;
+  document.getElementById('msgView').innerHTML=messages.map(m=>`
+    <div style="margin-bottom:1rem;padding:.5rem;background:${m.sender_id===ME.id?'#d99b16':'white'};border-radius:8px;color:${m.sender_id===ME.id?'#171410':'black'}">
+      <strong style="font-size:11px;opacity:0.7">${m.sender_id===ME.id?'You':CURRENT_CONV.other_name}</strong>
+      <div style="margin-top:.3rem">${esc(m.body)}</div>
+      <span style="font-size:10px;opacity:0.6">${new Date(m.created_at).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</span>
+    </div>
+  `).join('');
+  document.getElementById('msgBody').value='';
+  document.querySelectorAll('.msg-conv').forEach((el,j)=>el.style.background=j===i?'#d99b16':'var(--bg-2)');
+}
+async function sendMsg(){
+  if(!CURRENT_CONV){toast('Select a conversation');return;}
+  const body=document.getElementById('msgBody').value.trim();
+  if(!body){toast('Message cannot be empty');return;}
+  try{
+    await api('/api/messages',{method:'POST',body:JSON.stringify({recipient_id:CURRENT_CONV.other_id,body})});
+    toast('Message sent');renderMsg();
+  }catch(e){toast(e.message);}
+}
+function renderAssign(){
+  const coOpts=MY.courses.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  document.getElementById('view').innerHTML=`<div class="card"><h3>Post an assignment</h3>
+    <label>Course</label><select id="a_course">${coOpts||'<option>Create courses first</option>'}</select>
+    <label>Title</label><input id="a_title" placeholder="e.g. Chapter 5 exercises">
+    <label>Description</label><textarea id="a_desc" rows="2" style="width:100%;font:inherit;padding:.5rem;border:1px solid var(--line);border-radius:8px;background:var(--bg-3)" placeholder="Instructions or details..."></textarea>
+    <label>Due date</label><input id="a_due" type="date">
+    <div style="margin-top:.8rem"><button class="btn green" onclick="postAssign()">Post assignment</button></div>
+  </div>
+  <div class="card" style="margin-top:.9rem"><h3>My assignments</h3>
+    <div id="assignList"></div>
+  </div>`;
+  loadAssignList();
+}
+async function postAssign(){try{
+  const title=document.getElementById('a_title').value.trim();const cid=document.getElementById('a_course').value;
+  if(!title||!cid){toast('Enter title and pick course');return;}
+  await api('/api/teacher/assignments',{method:'POST',body:JSON.stringify({course_id:Number(cid),title,description:document.getElementById('a_desc').value,due_date:document.getElementById('a_due').value||null})});
+  toast('Assignment posted');document.getElementById('a_title').value='';document.getElementById('a_desc').value='';loadAssignList();
+}catch(e){toast(e.message);}}
+async function loadAssignList(){
+  try{
+    const cid=document.getElementById('a_course').value;if(!cid)return;
+    const {assignments}=await api('/api/teacher/assignments?course_id='+cid);
+    const el=document.getElementById('assignList');
+    el.innerHTML=assignments.length?assignments.map(a=>`<div style="border-bottom:1px solid var(--line);padding:.6rem 0">
+      <div class="row" style="justify-content:space-between"><strong>${esc(a.title)}</strong><button class="btn ghost sm" onclick="viewSubs(${a.id})">View (${a.submitted}/${a.submitted+a.pending})</button></div>
+      <div class="small muted">${esc(a.description||'')}</div>
+      <div class="small muted">Due: ${a.due_date?new Date(a.due_date+'T00:00Z').toLocaleDateString():'—'}</div></div>`).join(''):'<p class="muted">No assignments for this course yet.</p>';
+  }catch(e){}
+}
+async function viewSubs(aid){
+  const wrap=document.createElement('div');
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:999;padding:1rem';
+  wrap.innerHTML=`<div class="card" style="max-width:600px;width:100%;max-height:90vh;overflow:auto"><h3 style="margin-top:0">Submissions</h3><div id="subList"></div>
+    <button class="btn ghost" onclick="this.parentElement.parentElement.remove()" style="margin-top:1rem">Close</button></div>`;
+  document.body.appendChild(wrap);
+  wrap.querySelector('#subList').innerHTML='<p class="muted">Submissions list coming — feature in progress</p>';
+}
 function renderAtt(){
   const today=new Date().toISOString().slice(0,10);
   document.getElementById('view').innerHTML=`<div class="card"><h3>Take attendance</h3>
@@ -81,18 +191,23 @@ function renderMarks(){
     <button class="btn sm" onclick="loadMarks()">Load</button></div>
     <div id="marks" style="margin-top:.8rem"></div></div>`;
 }
+let WEIGHTS={ca:30,exam:70};
 async function loadMarks(){
   if(!m_exam.value||!m_course.value){toast('Pick exam and course');return;}
-  const {students,results}=await api(`/api/teacher/results?exam_id=${m_exam.value}&course_id=${m_course.value}`);
+  const {students,results,weights}=await api(`/api/teacher/results?exam_id=${m_exam.value}&course_id=${m_course.value}`);
+  WEIGHTS=weights||WEIGHTS;
   if(!students.length){document.getElementById('marks').innerHTML='<p class="muted">No students for this course\'s class.</p>';return;}
-  document.getElementById('marks').innerHTML=`<table><thead><tr><th>Student</th><th>Score</th><th>Out of</th></tr></thead><tbody>${students.map(s=>{
-    const r=results[s.id]||{};return `<tr><td>${esc(s.name)}</td>
-    <td><input id="sc_${s.id}" type="number" value="${r.score??''}" style="max-width:90px"></td>
-    <td><input id="mx_${s.id}" type="number" value="${r.max_score??100}" style="max-width:90px"></td></tr>`;}).join('')}</tbody></table>
+  document.getElementById('marks').innerHTML=`<div class="small muted" style="margin-bottom:.4rem">Class score is out of ${WEIGHTS.ca}, exam out of ${WEIGHTS.exam}. Total = ${WEIGHTS.ca+WEIGHTS.exam}.</div>
+  <table><thead><tr><th>Student</th><th>Class /${WEIGHTS.ca}</th><th>Exam /${WEIGHTS.exam}</th><th>Total</th></tr></thead><tbody>${students.map(s=>{
+    const r=results[s.id]||{};const ca=r.ca_score??'';const ex=r.exam_score??'';return `<tr><td>${esc(s.name)}</td>
+    <td><input id="ca_${s.id}" type="number" min="0" max="${WEIGHTS.ca}" value="${ca}" oninput="calcTotal(${s.id})" style="max-width:80px"></td>
+    <td><input id="ex_${s.id}" type="number" min="0" max="${WEIGHTS.exam}" value="${ex}" oninput="calcTotal(${s.id})" style="max-width:80px"></td>
+    <td><b id="tot_${s.id}">${(ca!==''||ex!=='')?(Number(ca||0)+Number(ex||0)):''}</b></td></tr>`;}).join('')}</tbody></table>
     <div style="margin-top:.7rem"><button class="btn green" onclick="saveMarks(${JSON.stringify(students.map(s=>s.id))})">Save marks</button></div>`;
 }
+function calcTotal(id){const ca=Number(document.getElementById('ca_'+id).value||0),ex=Number(document.getElementById('ex_'+id).value||0);document.getElementById('tot_'+id).textContent=(ca+ex)||'';}
 async function saveMarks(ids){
-  try{const records=ids.map(id=>({student_id:id,score:document.getElementById('sc_'+id).value||0,max_score:document.getElementById('mx_'+id).value||100}));
+  try{const records=ids.map(id=>({student_id:id,ca:document.getElementById('ca_'+id).value||0,exam:document.getElementById('ex_'+id).value||0}));
     await api('/api/teacher/results',{method:'POST',body:JSON.stringify({exam_id:m_exam.value,course_id:m_course.value,records})});
     toast('Marks saved');}catch(e){toast(e.message);}
 }

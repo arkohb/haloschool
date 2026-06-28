@@ -21,8 +21,9 @@
   <div class="spacer"></div>
   <button class="btn ghost sm" style="color:#fdf6e6;border-color:#4a443a" onclick="logout()">Sign out</button>
 </header>
-<div class="wrap" id="app" class="hidden"><div id="view"></div></div>
+<div class="wrap" id="app" class="hidden"><div id="notices"></div><div id="view"></div></div>
 <div id="toast" class="toast hidden"></div>
+<script src="/report.js"></script>
 <script>
 const token=localStorage.getItem('school_token');
 const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
@@ -60,21 +61,31 @@ async function load(){
     <div class="card" style="margin-top:.9rem"><h3>Timetable</h3>${d.timetable.length?ttGrid(d.timetable):'<p class="muted">No timetable set.</p>'}</div>
     <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><h3 style="padding:.4rem">Marks</h3>
       <table><thead><tr><th>Course</th><th>Exam</th><th>Score</th><th>Grade</th></tr></thead><tbody>${results}</tbody></table></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><h3 style="padding:.4rem">Assignments</h3>
+      <div id="assignSec"><p class="muted small" style="padding:.4rem">Loading...</p></div></div>
     <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><h3 style="padding:.4rem">Fees</h3>
       <table><thead><tr><th>Title</th><th>Amount</th><th>Status</th></tr></thead><tbody>${inv}</tbody></table></div>`;
+  loadAssignments();
 }
-async function reportCard(){
-  const d=await api('/api/report/'+SID);
-  const rows=d.results.map(r=>`<tr><td>${esc(r.course||'')}</td><td>${esc(r.exam||'')}</td><td>${r.score}/${r.max_score}</td><td>${esc(r.grade||'')}</td></tr>`).join('')||'<tr><td colspan="4">No results yet</td></tr>';
-  const att=d.attendance,tot=att.present+att.absent+att.late;const w=window.open('','_blank');
-  w.document.write(`<html><head><title>Report card</title><style>body{font-family:sans-serif;max-width:680px;margin:24px auto;color:#1a1712}h1{color:#d99b16}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #e2d6bd;padding:8px;text-align:left}.head{display:flex;justify-content:space-between;border-bottom:3px solid #171410;padding-bottom:8px}</style></head>
-    <body><div class="head"><div><h1>${esc(d.school.name)}</h1><div>Report Card</div></div><div style="text-align:right"><b>${esc(d.student.name)}</b><div>${esc(d.student.admission_no||'')}</div><div>${esc(d.student.class_name||'')}</div></div></div>
-    <table><thead><tr><th>Course</th><th>Exam</th><th>Score</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table>
-    <p style="margin-top:14px">Attendance: <b>${att.present}</b> present, <b>${att.absent}</b> absent, <b>${att.late}</b> late${tot?` (${Math.round(att.present/tot*100)}%)`:''}.</p>
-    <script>window.print()<\/script>
-</body></html>`);w.document.close();
-}
-(async()=>{if(await guard()){document.getElementById('app').classList.remove('hidden');load();}})();
+async function loadAssignments(){try{
+  const {assignments}=await api('/api/student/assignments');
+  const el=document.getElementById('assignSec');
+  if(!assignments.length){el.innerHTML='<p class="muted small" style="padding:.4rem">No active assignments.</p>';return;}
+  el.innerHTML=`<table><thead><tr><th>Assignment</th><th>Due</th><th>Status</th></tr></thead><tbody>${assignments.map(a=>{
+    const due=a.due_date?new Date(a.due_date+'T00:00Z').toLocaleDateString():'—';
+    const due_class=a.due_date&&new Date(a.due_date)<new Date()?'style="color:var(--bad)"':'';
+    const status=a.submitted_at?`<span class="pill released">Submitted ${new Date(a.submitted_at).toLocaleDateString()}</span>`:a.grade!=null?`<span class="pill locked">Graded: ${a.grade}</span>`:'<span class="pill">Pending</span>';
+    return `<tr><td><strong>${esc(a.title)}</strong><br><span class="small muted">${esc(a.course)}</span></td><td ${due_class}>${due}</td><td>${status}</td></tr>`;
+  }).join('')}</tbody></table>`;
+}catch(e){}}
+async function reportCard(){try{const d=await api('/api/report/'+SID);printReportCard(d);}catch(e){toast(e.message);}}
+async function loadNotices(){try{const {announcements}=await api('/api/announcements');const el=document.getElementById('notices');if(!el)return;
+  if(!announcements.length){el.innerHTML='';return;}
+  el.innerHTML=`<div class="card" style="margin-bottom:1rem"><h3 style="margin-top:0">📣 Announcements</h3>${announcements.slice(0,6).map(a=>`<div style="border-bottom:1px solid var(--line);padding:.5rem 0">
+    <strong>${esc(a.title)}</strong><div class="small" style="white-space:pre-wrap;margin:.15rem 0">${esc(a.body||'')}</div>
+    <div class="small muted">${new Date((a.created_at||'').replace(' ','T')+'Z').toLocaleDateString()}</div></div>`).join('')}</div>`;
+}catch(e){}}
+(async()=>{if(await guard()){document.getElementById('app').classList.remove('hidden');loadNotices();load();}})();
 </script>
 <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});}</script>
 </body>
