@@ -2,10 +2,10 @@
   "name": "haloschool",
   "version": "2.0.0",
   "type": "commonjs",
-  "main": "backend/server.js",
+ "main": "server.js",
   "scripts": {
-    "start": "node backend/server.js",
-    "dev": "node backend/server.js"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
   "dependencies": {
     "better-sqlite3": "^9.0.0",
