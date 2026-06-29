@@ -1,6 +1,6 @@
 /**
  * HaloSchool - Multi-Tenant School Management System
- * Version: 2.0.0 (Multi-Tenant with School Name IDs)
+ * Version: 2.0.1 (Fixed Database Initialization)
  * Updated: June 29, 2026
  * 
  * Features:
@@ -24,13 +24,14 @@ const DATABASE_PATH = process.env.DATABASE || './school.db';
 
 let db;
 
-// Initialize database
+// Initialize database with error handling
 try {
+  console.log('Initializing database...');
   db = new Database(DATABASE_PATH);
   db.pragma('journal_mode = WAL');
   console.log('✓ Database connected:', DATABASE_PATH);
   
-  // Create tables if they don't exist
+  // Create schools table
   db.exec(`
     CREATE TABLE IF NOT EXISTS schools (
       id TEXT PRIMARY KEY,
@@ -42,8 +43,12 @@ try {
       status TEXT DEFAULT 'active',
       created_at TEXT,
       updated_at TEXT
-    );
+    )
+  `);
+  console.log('✓ Schools table created/verified');
 
+  // Create users table
+  db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       school_id TEXT NOT NULL,
@@ -62,8 +67,12 @@ try {
       updated_at TEXT,
       FOREIGN KEY(school_id) REFERENCES schools(id),
       UNIQUE(school_id, login_id)
-    );
+    )
+  `);
+  console.log('✓ Users table created/verified');
 
+  // Create classes table
+  db.exec(`
     CREATE TABLE IF NOT EXISTS classes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       school_id TEXT NOT NULL,
@@ -71,8 +80,12 @@ try {
       level TEXT,
       created_at TEXT,
       FOREIGN KEY(school_id) REFERENCES schools(id)
-    );
+    )
+  `);
+  console.log('✓ Classes table created/verified');
 
+  // Create students table
+  db.exec(`
     CREATE TABLE IF NOT EXISTS students (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       school_id TEXT NOT NULL,
@@ -87,16 +100,22 @@ try {
       FOREIGN KEY(user_id) REFERENCES users(id),
       FOREIGN KEY(parent_id) REFERENCES users(id),
       FOREIGN KEY(class_id) REFERENCES classes(id)
-    );
+    )
+  `);
+  console.log('✓ Students table created/verified');
 
+  // Create indexes
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_users_school ON users(school_id);
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
     CREATE INDEX IF NOT EXISTS idx_students_school ON students(school_id);
   `);
+  console.log('✓ Indexes created/verified');
   
-  console.log('✓ Database schema initialized');
+  console.log('✓ Database schema fully initialized');
 } catch (e) {
-  console.error('✗ Database error:', e.message);
+  console.error('✗ Database initialization error:', e.message);
+  console.error('Stack:', e.stack);
   process.exit(1);
 }
 
@@ -186,9 +205,9 @@ function signToken(user) {
     email: user.email,
     name: user.name,
     role: user.role,
-    school_id: user.school_id,  // KEY: Include school_id!
+    school_id: user.school_id,
     iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 86400 * 30  // 30 days
+    exp: Math.floor(Date.now() / 1000) + 86400 * 30
   };
   return jwt.sign(payload, JWT_SECRET);
 }
@@ -258,457 +277,429 @@ function need(res, me, ...roles) {
 // ============================================================================
 
 const server = http.createServer(async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200);
-    res.end();
-    return;
-  }
-
-  const p = new URL(req.url, `http://${req.headers.host}`).pathname;
-  const q = new URL(req.url, `http://${req.headers.host}`).searchParams;
-  
-  // Get current user from JWT
-  let me = null;
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.replace('Bearer ', '');
-  if (token && token !== 'null') {
-    me = verifyToken(token);
-  }
-
-  // ========================================================================
-  // HEALTH CHECK
-  // ========================================================================
-
-  if (p === '/api/health') {
-    return json(res, 200, { status: 'ok', timestamp: new Date().toISOString() });
-  }
-
-  // ========================================================================
-  // AUTHENTICATION ENDPOINTS
-  // ========================================================================
-
-  // Login endpoint - UPDATED to include school_id in JWT
-  if (req.method === 'POST' && p === '/api/login') {
-    const b = await jread(req);
-    const login = String(b.login_id || '').trim().toLowerCase();
-    const password = String(b.password || '');
-
-    if (!login || !password) {
-      return json(res, 400, { error: 'login_id and password required' });
-    }
-
-    const user = db.prepare('SELECT * FROM users WHERE login_id=?').get(login);
+  try {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     
-    if (!user || !checkPassword(password, user.password_hash, user.salt)) {
-      return json(res, 401, { error: 'wrong login ID or password' });
+    if (req.method === 'OPTIONS') {
+      res.writeHead(200);
+      res.end();
+      return;
     }
 
-    if (user.status === 'suspended') {
-      return json(res, 403, { error: 'your account is suspended' });
-    }
-
-    // Get school info
-    const school = db.prepare('SELECT name FROM schools WHERE id=?').get(user.school_id);
-
-    const token = signToken(user);
-
-    return json(res, 200, {
-      token: token,
-      role: user.role,
-      school_id: user.school_id,          // ← School name slug!
-      school_name: school?.name || 'School',
-      name: user.name,
-      email: user.email,
-      must_change_pw: !!user.must_change_password
-    });
-  }
-
-  // ========================================================================
-  // ENROLLMENT ENDPOINTS (NEW)
-  // ========================================================================
-
-  // GET enrollment data (public, no auth needed)
-  if (req.method === 'GET' && p === '/api/enrollment-data') {
-    const token = q.get('token');
+    const p = new URL(req.url, `http://${req.headers.host}`).pathname;
+    const q = new URL(req.url, `http://${req.headers.host}`).searchParams;
     
-    if (!token) {
-      return json(res, 400, { error: 'token required' });
+    // Get current user from JWT
+    let me = null;
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace('Bearer ', '');
+    if (token && token !== 'null') {
+      me = verifyToken(token);
     }
 
-    const user = db.prepare('SELECT * FROM users WHERE enrollment_token=?').get(token);
-    
-    if (!user) {
-      return json(res, 404, { error: 'invalid enrollment link' });
+    // ========================================================================
+    // HEALTH CHECK
+    // ========================================================================
+
+    if (p === '/api/health') {
+      return json(res, 200, { status: 'ok', timestamp: new Date().toISOString() });
     }
 
-    const school = db.prepare('SELECT name FROM schools WHERE id=?').get(user.school_id);
+    // ========================================================================
+    // AUTHENTICATION ENDPOINTS
+    // ========================================================================
 
-    return json(res, 200, {
-      school_id: user.school_id,
-      school_name: school?.name || 'School',
-      email: user.email,
-      role: user.role,
-      name: user.name
-    });
-  }
+    if (req.method === 'POST' && p === '/api/login') {
+      const b = await jread(req);
+      const login = String(b.login_id || '').trim().toLowerCase();
+      const password = String(b.password || '');
 
-  // Complete enrollment (public, no auth needed)
-  if (req.method === 'POST' && p === '/api/enroll') {
-    const b = await jread(req);
-    const { enrollment_token, email, new_password } = b;
+      if (!login || !password) {
+        return json(res, 400, { error: 'login_id and password required' });
+      }
 
-    if (!enrollment_token || !email || !new_password) {
-      return json(res, 400, { error: 'missing required fields' });
-    }
+      const user = db.prepare('SELECT * FROM users WHERE login_id=?').get(login);
+      
+      if (!user || !checkPassword(password, user.password_hash, user.salt)) {
+        return json(res, 401, { error: 'wrong login ID or password' });
+      }
 
-    const user = db.prepare('SELECT * FROM users WHERE enrollment_token=?').get(enrollment_token);
-    
-    if (!user) {
-      return json(res, 404, { error: 'invalid enrollment link' });
-    }
+      if (user.status === 'suspended') {
+        return json(res, 403, { error: 'your account is suspended' });
+      }
 
-    if (user.email !== email) {
-      return json(res, 400, { error: 'email mismatch' });
-    }
+      const school = db.prepare('SELECT name FROM schools WHERE id=?').get(user.school_id);
+      const jwtToken = signToken(user);
 
-    if (new_password.length < 8) {
-      return json(res, 400, { error: 'password must be at least 8 characters' });
-    }
-
-    // Validate password strength
-    if (!/[a-z]/.test(new_password) || !/[A-Z]/.test(new_password) || !/\d/.test(new_password)) {
-      return json(res, 400, { 
-        error: 'password must contain uppercase, lowercase, and numbers' 
+      return json(res, 200, {
+        token: jwtToken,
+        role: user.role,
+        school_id: user.school_id,
+        school_name: school?.name || 'School',
+        name: user.name,
+        email: user.email,
+        must_change_pw: !!user.must_change_password
       });
     }
 
-    // Hash password
-    const { hash: pwd_hash, salt } = hashPassword(new_password);
+    // ========================================================================
+    // ENROLLMENT ENDPOINTS
+    // ========================================================================
 
-    // Update user
-    db.prepare(`
-      UPDATE users 
-      SET password_hash=?, salt=?, enrollment_token=NULL, must_change_password=false 
-      WHERE id=?
-    `).run(pwd_hash, salt, user.id);
+    if (req.method === 'GET' && p === '/api/enrollment-data') {
+      const token = q.get('token');
+      
+      if (!token) {
+        return json(res, 400, { error: 'token required' });
+      }
 
-    // Generate token
-    const token = signToken(user);
+      const user = db.prepare('SELECT * FROM users WHERE enrollment_token=?').get(token);
+      
+      if (!user) {
+        return json(res, 404, { error: 'invalid enrollment link' });
+      }
 
-    return json(res, 200, {
-      token: token,
-      school_id: user.school_id,
-      role: user.role,
-      redirect: `/${user.role}`
-    });
-  }
+      const school = db.prepare('SELECT name FROM schools WHERE id=?').get(user.school_id);
 
-  // ========================================================================
-  // SCHOOL ENDPOINTS
-  // ========================================================================
-
-  // Register new school
-  if (req.method === 'POST' && p === '/api/school/signup') {
-    const b = await jread(req);
-    const { school_name, admin_name, email, phone, password, tier } = b;
-
-    if (!school_name || !admin_name || !email || !password) {
-      return json(res, 400, { error: 'required fields missing' });
+      return json(res, 200, {
+        school_id: user.school_id,
+        school_name: school?.name || 'School',
+        email: user.email,
+        role: user.role,
+        name: user.name
+      });
     }
 
-    // Generate unique slug from school name
-    const school_id = getUniqueSchoolSlug(school_name);
+    if (req.method === 'POST' && p === '/api/enroll') {
+      const b = await jread(req);
+      const { enrollment_token, email, new_password } = b;
 
-    // Hash admin password
-    const { hash: pwd_hash, salt } = hashPassword(password);
+      if (!enrollment_token || !email || !new_password) {
+        return json(res, 400, { error: 'missing required fields' });
+      }
 
-    try {
-      // Create school
+      const user = db.prepare('SELECT * FROM users WHERE enrollment_token=?').get(enrollment_token);
+      
+      if (!user) {
+        return json(res, 404, { error: 'invalid enrollment link' });
+      }
+
+      if (user.email !== email) {
+        return json(res, 400, { error: 'email mismatch' });
+      }
+
+      if (new_password.length < 8) {
+        return json(res, 400, { error: 'password must be at least 8 characters' });
+      }
+
+      if (!/[a-z]/.test(new_password) || !/[A-Z]/.test(new_password) || !/\d/.test(new_password)) {
+        return json(res, 400, { 
+          error: 'password must contain uppercase, lowercase, and numbers' 
+        });
+      }
+
+      const { hash: pwd_hash, salt } = hashPassword(new_password);
+
       db.prepare(`
-        INSERT INTO schools (id, name, email, phone, tier, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-      `).run(school_id, school_name, email, phone || null, tier || 'free', 'pending');
+        UPDATE users 
+        SET password_hash=?, salt=?, enrollment_token=NULL, must_change_password=false 
+        WHERE id=?
+      `).run(pwd_hash, salt, user.id);
 
-      // Create school admin user
-      const adminResult = db.prepare(`
-        INSERT INTO users (
-          school_id, name, email, login_id, role, password_hash, salt, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).run(
-        school_id,
-        admin_name,
-        email,
-        email,
-        'school_admin',
-        pwd_hash,
-        salt,
-        'pending'
-      );
+      const jwtToken = signToken(user);
 
-      // Update school with admin user id
-      db.prepare('UPDATE schools SET admin_user_id=? WHERE id=?').run(
-        adminResult.lastInsertRowid,
-        school_id
-      );
-
-      return json(res, 201, {
-        message: 'School registered successfully',
-        school_id: school_id,
-        school_name: school_name,
-        status: 'pending_approval'
+      return json(res, 200, {
+        token: jwtToken,
+        school_id: user.school_id,
+        role: user.role,
+        redirect: `/${user.role}`
       });
-    } catch (e) {
-      if (e.message.includes('UNIQUE')) {
-        return json(res, 409, { error: 'school name already registered' });
+    }
+
+    // ========================================================================
+    // SCHOOL ENDPOINTS
+    // ========================================================================
+
+    if (req.method === 'POST' && p === '/api/school/signup') {
+      const b = await jread(req);
+      const { school_name, admin_name, email, phone, password, tier } = b;
+
+      if (!school_name || !admin_name || !email || !password) {
+        return json(res, 400, { error: 'required fields missing' });
       }
-      return json(res, 500, { error: 'registration failed' });
-    }
-  }
 
-  // ========================================================================
-  // ADMIN ENDPOINTS (TEACHER/PARENT/STUDENT MANAGEMENT)
-  // ========================================================================
+      const school_id = getUniqueSchoolSlug(school_name);
+      const { hash: pwd_hash, salt } = hashPassword(password);
 
-  // Add teacher with auto enrollment
-  if (req.method === 'POST' && p === '/api/admin/add-teacher') {
-    if (!need(res, me, 'school_admin', 'super')) return;
+      try {
+        db.prepare(`
+          INSERT INTO schools (id, name, email, phone, tier, status, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(school_id, school_name, email, phone || null, tier || 'free', 'active');
 
-    const b = await jread(req);
-    const { name, email, phone, subject } = b;
+        const adminResult = db.prepare(`
+          INSERT INTO users (
+            school_id, name, email, login_id, role, password_hash, salt, status, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          school_id,
+          admin_name,
+          email,
+          email,
+          'school_admin',
+          pwd_hash,
+          salt,
+          'active'
+        );
 
-    if (!name || !email) {
-      return json(res, 400, { error: 'name and email required' });
-    }
+        db.prepare('UPDATE schools SET admin_user_id=? WHERE id=?').run(
+          adminResult.lastInsertRowid,
+          school_id
+        );
 
-    // Generate enrollment details
-    const enrollment_token = generateEnrollmentToken();
-    const temporary_password = generateTemporaryPassword();
-    const schoolId = me.school_id;
-
-    try {
-      // Create teacher user
-      const result = db.prepare(`
-        INSERT INTO users (
-          school_id, name, email, phone, role, login_id,
-          enrollment_token, temporary_password, must_change_password, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).run(
-        schoolId,
-        name,
-        email,
-        phone || null,
-        'teacher',
-        email,
-        enrollment_token,
-        temporary_password,
-        true,
-        'active'
-      );
-
-      // Get school name for response
-      const school = db.prepare('SELECT name FROM schools WHERE id=?').get(schoolId);
-
-      return json(res, 201, {
-        message: `Teacher added to ${school.name}`,
-        user_id: result.lastInsertRowid,
-        email: email,
-        enrollment_link: `${BASE_URL}/enroll/${enrollment_token}`,
-        temporary_password: temporary_password,
-        note: 'Share enrollment link and temporary password with teacher'
-      });
-    } catch (e) {
-      if (e.message.includes('UNIQUE')) {
-        return json(res, 409, { error: 'Email already registered' });
+        return json(res, 201, {
+          message: 'School registered successfully',
+          school_id: school_id,
+          school_name: school_name,
+          status: 'active'
+        });
+      } catch (e) {
+        if (e.message.includes('UNIQUE')) {
+          return json(res, 409, { error: 'school name already registered' });
+        }
+        return json(res, 500, { error: 'registration failed' });
       }
-      return json(res, 500, { error: 'Failed to add teacher' });
-    }
-  }
-
-  // Add parent with auto enrollment
-  if (req.method === 'POST' && p === '/api/admin/add-parent') {
-    if (!need(res, me, 'school_admin', 'super')) return;
-
-    const b = await jread(req);
-    const { name, email, phone, child_name } = b;
-
-    if (!name || !email) {
-      return json(res, 400, { error: 'name and email required' });
     }
 
-    const enrollment_token = generateEnrollmentToken();
-    const temporary_password = generateTemporaryPassword();
-    const schoolId = me.school_id;
+    // ========================================================================
+    // ADMIN ENDPOINTS
+    // ========================================================================
 
-    try {
-      const result = db.prepare(`
-        INSERT INTO users (
-          school_id, name, email, phone, role, login_id,
-          enrollment_token, temporary_password, must_change_password, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).run(
-        schoolId,
-        name,
-        email,
-        phone || null,
-        'parent',
-        email,
-        enrollment_token,
-        temporary_password,
-        true,
-        'active'
-      );
+    if (req.method === 'POST' && p === '/api/admin/add-teacher') {
+      if (!need(res, me, 'school_admin', 'super')) return;
 
-      const school = db.prepare('SELECT name FROM schools WHERE id=?').get(schoolId);
+      const b = await jread(req);
+      const { name, email, phone, subject } = b;
 
-      return json(res, 201, {
-        message: `Parent added to ${school.name}`,
-        user_id: result.lastInsertRowid,
-        email: email,
-        enrollment_link: `${BASE_URL}/enroll/${enrollment_token}`,
-        temporary_password: temporary_password
-      });
-    } catch (e) {
-      if (e.message.includes('UNIQUE')) {
-        return json(res, 409, { error: 'Email already registered' });
+      if (!name || !email) {
+        return json(res, 400, { error: 'name and email required' });
       }
-      return json(res, 500, { error: 'Failed to add parent' });
-    }
-  }
 
-  // Add student with auto enrollment
-  if (req.method === 'POST' && p === '/api/admin/add-student') {
-    if (!need(res, me, 'school_admin', 'super')) return;
+      const enrollment_token = generateEnrollmentToken();
+      const temporary_password = generateTemporaryPassword();
+      const schoolId = me.school_id;
 
-    const b = await jread(req);
-    const { name, email, phone, class_id } = b;
+      try {
+        const result = db.prepare(`
+          INSERT INTO users (
+            school_id, name, email, phone, role, login_id,
+            enrollment_token, temporary_password, must_change_password, status, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          schoolId,
+          name,
+          email,
+          phone || null,
+          'teacher',
+          email,
+          enrollment_token,
+          temporary_password,
+          1,
+          'active'
+        );
 
-    if (!name || !email) {
-      return json(res, 400, { error: 'name and email required' });
-    }
+        const school = db.prepare('SELECT name FROM schools WHERE id=?').get(schoolId);
 
-    const enrollment_token = generateEnrollmentToken();
-    const temporary_password = generateTemporaryPassword();
-    const schoolId = me.school_id;
-
-    try {
-      const result = db.prepare(`
-        INSERT INTO users (
-          school_id, name, email, phone, role, login_id,
-          enrollment_token, temporary_password, must_change_password, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).run(
-        schoolId,
-        name,
-        email,
-        phone || null,
-        'student',
-        email,
-        enrollment_token,
-        temporary_password,
-        true,
-        'active'
-      );
-
-      const school = db.prepare('SELECT name FROM schools WHERE id=?').get(schoolId);
-
-      return json(res, 201, {
-        message: `Student added to ${school.name}`,
-        user_id: result.lastInsertRowid,
-        email: email,
-        enrollment_link: `${BASE_URL}/enroll/${enrollment_token}`,
-        temporary_password: temporary_password
-      });
-    } catch (e) {
-      if (e.message.includes('UNIQUE')) {
-        return json(res, 409, { error: 'Email already registered' });
+        return json(res, 201, {
+          message: `Teacher added to ${school.name}`,
+          user_id: result.lastInsertRowid,
+          email: email,
+          enrollment_link: `${BASE_URL}/enroll/${enrollment_token}`,
+          temporary_password: temporary_password
+        });
+      } catch (e) {
+        if (e.message.includes('UNIQUE')) {
+          return json(res, 409, { error: 'Email already registered' });
+        }
+        return json(res, 500, { error: 'Failed to add teacher' });
       }
-      return json(res, 500, { error: 'Failed to add student' });
     }
-  }
 
-  // ========================================================================
-  // ROLE-BASED DATA ENDPOINTS (FILTERED BY SCHOOL_ID)
-  // ========================================================================
+    if (req.method === 'POST' && p === '/api/admin/add-parent') {
+      if (!need(res, me, 'school_admin', 'super')) return;
 
-  // Teacher - Get their classes (filtered by school_id)
-  if (req.method === 'GET' && p === '/api/teacher/classes') {
-    if (!need(res, me, 'teacher', 'school_admin', 'super')) return;
+      const b = await jread(req);
+      const { name, email, phone } = b;
 
-    const schoolId = me.school_id;  // From JWT token
-    
-    const classes = db.prepare(`
-      SELECT c.id, c.name, c.level, COUNT(s.id) as student_count
-      FROM classes c
-      LEFT JOIN students s ON s.class_id = c.id
-      WHERE c.school_id = ?
-      GROUP BY c.id
-      ORDER BY c.name
-    `).all(schoolId);
+      if (!name || !email) {
+        return json(res, 400, { error: 'name and email required' });
+      }
 
-    return json(res, 200, { classes });
-  }
+      const enrollment_token = generateEnrollmentToken();
+      const temporary_password = generateTemporaryPassword();
+      const schoolId = me.school_id;
 
-  // Parent - Get their children (filtered by school_id)
-  if (req.method === 'GET' && p === '/api/parent/children') {
-    if (!need(res, me, 'parent', 'school_admin', 'super')) return;
+      try {
+        const result = db.prepare(`
+          INSERT INTO users (
+            school_id, name, email, phone, role, login_id,
+            enrollment_token, temporary_password, must_change_password, status, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          schoolId,
+          name,
+          email,
+          phone || null,
+          'parent',
+          email,
+          enrollment_token,
+          temporary_password,
+          1,
+          'active'
+        );
 
-    const schoolId = me.school_id;
+        const school = db.prepare('SELECT name FROM schools WHERE id=?').get(schoolId);
 
-    const children = db.prepare(`
-      SELECT s.id, s.name, s.admission_number, c.name as class_name
-      FROM students s
-      LEFT JOIN classes c ON s.class_id = c.id
-      WHERE s.school_id = ? AND s.parent_id = ?
-      ORDER BY s.name
-    `).all(schoolId, me.id);
+        return json(res, 201, {
+          message: `Parent added to ${school.name}`,
+          user_id: result.lastInsertRowid,
+          email: email,
+          enrollment_link: `${BASE_URL}/enroll/${enrollment_token}`,
+          temporary_password: temporary_password
+        });
+      } catch (e) {
+        if (e.message.includes('UNIQUE')) {
+          return json(res, 409, { error: 'Email already registered' });
+        }
+        return json(res, 500, { error: 'Failed to add parent' });
+      }
+    }
 
-    return json(res, 200, { children });
-  }
+    if (req.method === 'POST' && p === '/api/admin/add-student') {
+      if (!need(res, me, 'school_admin', 'super')) return;
 
-  // Student - Get their data (filtered by school_id)
-  if (req.method === 'GET' && p === '/api/student/me') {
-    if (!need(res, me, 'student')) return;
+      const b = await jread(req);
+      const { name, email, admission_number } = b;
 
-    const schoolId = me.school_id;
+      if (!name || !email) {
+        return json(res, 400, { error: 'name and email required' });
+      }
 
-    const student = db.prepare(`
-      SELECT s.id, s.name, s.admission_number, c.name as class_name
-      FROM students s
-      LEFT JOIN classes c ON s.class_id = c.id
-      WHERE s.school_id = ? AND s.user_id = ?
-    `).get(schoolId, me.id);
+      const enrollment_token = generateEnrollmentToken();
+      const temporary_password = generateTemporaryPassword();
+      const schoolId = me.school_id;
 
-    return json(res, 200, { student: student || {} });
-  }
+      try {
+        const result = db.prepare(`
+          INSERT INTO users (
+            school_id, name, email, role, login_id,
+            enrollment_token, temporary_password, must_change_password, status, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          schoolId,
+          name,
+          email,
+          'student',
+          email,
+          enrollment_token,
+          temporary_password,
+          1,
+          'active'
+        );
 
-  // Admin - Get all students in their school (filtered by school_id)
-  if (req.method === 'GET' && p === '/api/admin/students') {
-    if (!need(res, me, 'school_admin', 'super')) return;
+        const school = db.prepare('SELECT name FROM schools WHERE id=?').get(schoolId);
 
-    const schoolId = me.school_id;
+        return json(res, 201, {
+          message: `Student added to ${school.name}`,
+          user_id: result.lastInsertRowid,
+          email: email,
+          enrollment_link: `${BASE_URL}/enroll/${enrollment_token}`,
+          temporary_password: temporary_password
+        });
+      } catch (e) {
+        if (e.message.includes('UNIQUE')) {
+          return json(res, 409, { error: 'Email already registered' });
+        }
+        return json(res, 500, { error: 'Failed to add student' });
+      }
+    }
 
-    const students = db.prepare(`
-      SELECT s.id, s.name, s.admission_number, c.name as class_name, s.status
-      FROM students s
-      LEFT JOIN classes c ON s.class_id = c.id
-      WHERE s.school_id = ?
-      ORDER BY s.name
-    `).all(schoolId);
+    // ========================================================================
+    // ROLE-BASED DATA ENDPOINTS
+    // ========================================================================
 
-    return json(res, 200, { students });
-  }
+    if (req.method === 'GET' && p === '/api/teacher/classes') {
+      if (!need(res, me, 'teacher', 'school_admin', 'super')) return;
 
-  // ========================================================================
-  // STATIC FILES
-  // ========================================================================
+      const schoolId = me.school_id;
+      
+      const classes = db.prepare(`
+        SELECT c.id, c.name, c.level, COUNT(s.id) as student_count
+        FROM classes c
+        LEFT JOIN students s ON s.class_id = c.id
+        WHERE c.school_id = ?
+        GROUP BY c.id
+        ORDER BY c.name
+      `).all(schoolId);
 
-  // Serve enrollment page
-  if (p === '/enroll' || p.startsWith('/enroll/')) {
-    const enrollHtml = `<!DOCTYPE html>
+      return json(res, 200, { classes });
+    }
+
+    if (req.method === 'GET' && p === '/api/parent/children') {
+      if (!need(res, me, 'parent', 'school_admin', 'super')) return;
+
+      const schoolId = me.school_id;
+
+      const children = db.prepare(`
+        SELECT s.id, s.name, s.admission_number, c.name as class_name
+        FROM students s
+        LEFT JOIN classes c ON s.class_id = c.id
+        WHERE s.school_id = ? AND s.parent_id = ?
+        ORDER BY s.name
+      `).all(schoolId, me.id);
+
+      return json(res, 200, { children });
+    }
+
+    if (req.method === 'GET' && p === '/api/student/me') {
+      if (!need(res, me, 'student')) return;
+
+      const schoolId = me.school_id;
+
+      const student = db.prepare(`
+        SELECT s.id, s.name, s.admission_number, c.name as class_name
+        FROM students s
+        LEFT JOIN classes c ON s.class_id = c.id
+        WHERE s.school_id = ? AND s.user_id = ?
+      `).get(schoolId, me.id);
+
+      return json(res, 200, { student: student || {} });
+    }
+
+    if (req.method === 'GET' && p === '/api/admin/students') {
+      if (!need(res, me, 'school_admin', 'super')) return;
+
+      const schoolId = me.school_id;
+
+      const students = db.prepare(`
+        SELECT s.id, s.name, s.admission_number, c.name as class_name, s.status
+        FROM students s
+        LEFT JOIN classes c ON s.class_id = c.id
+        WHERE s.school_id = ?
+        ORDER BY s.name
+      `).all(schoolId);
+
+      return json(res, 200, { students });
+    }
+
+    // ========================================================================
+    // STATIC FILES
+    // ========================================================================
+
+    if (p === '/enroll' || p.startsWith('/enroll/')) {
+      const enrollHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -798,11 +789,21 @@ const server = http.createServer(async (req, res) => {
   </script>
 </body>
 </html>`;
-    return html(res, enrollHtml);
-  }
+      return html(res, enrollHtml);
+    }
 
-  // 404
-  json(res, 404, { error: 'endpoint not found' });
+    // 404
+    json(res, 404, { error: 'endpoint not found' });
+  } catch (err) {
+    console.error('Request handler error:', err.message);
+    console.error('Stack:', err.stack);
+    try {
+      json(res, 500, { error: 'internal server error' });
+    } catch (e) {
+      res.writeHead(500);
+      res.end('Internal Server Error');
+    }
+  }
 });
 
 // ============================================================================
@@ -841,7 +842,19 @@ server.listen(PORT, () => {
 });
 
 server.on('error', (err) => {
-  console.error('Server error:', err);
+  console.error('Server error:', err.message);
+  console.error('Stack:', err.stack);
+  process.exit(1);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err.message);
+  console.error('Stack:', err.stack);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled rejection at:', promise, 'reason:', reason);
   process.exit(1);
 });
 
