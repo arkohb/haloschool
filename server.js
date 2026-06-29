@@ -29,6 +29,72 @@ try {
   db = new Database(DATABASE_PATH);
   db.pragma('journal_mode = WAL');
   console.log('✓ Database connected:', DATABASE_PATH);
+  
+  // Create tables if they don't exist
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schools (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      email TEXT,
+      phone TEXT,
+      tier TEXT DEFAULT 'free',
+      admin_user_id INTEGER,
+      status TEXT DEFAULT 'active',
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      school_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      phone TEXT,
+      login_id TEXT NOT NULL,
+      password_hash TEXT,
+      salt TEXT,
+      role TEXT DEFAULT 'student',
+      enrollment_token TEXT UNIQUE,
+      temporary_password TEXT,
+      must_change_password INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active',
+      created_at TEXT,
+      updated_at TEXT,
+      FOREIGN KEY(school_id) REFERENCES schools(id),
+      UNIQUE(school_id, login_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS classes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      school_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      level TEXT,
+      created_at TEXT,
+      FOREIGN KEY(school_id) REFERENCES schools(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS students (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      school_id TEXT NOT NULL,
+      user_id INTEGER,
+      parent_id INTEGER,
+      name TEXT NOT NULL,
+      admission_number TEXT,
+      class_id INTEGER,
+      status TEXT DEFAULT 'active',
+      created_at TEXT,
+      FOREIGN KEY(school_id) REFERENCES schools(id),
+      FOREIGN KEY(user_id) REFERENCES users(id),
+      FOREIGN KEY(parent_id) REFERENCES users(id),
+      FOREIGN KEY(class_id) REFERENCES classes(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_users_school ON users(school_id);
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    CREATE INDEX IF NOT EXISTS idx_students_school ON students(school_id);
+  `);
+  
+  console.log('✓ Database schema initialized');
 } catch (e) {
   console.error('✗ Database error:', e.message);
   process.exit(1);
