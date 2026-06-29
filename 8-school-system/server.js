@@ -82,8 +82,6 @@ function applyCors(req, res) {
     res.setHeader("Vary", "Origin");
   }
 }
-  }
-}
 /* ============================================================== */
 
 const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH || process.env.DATA_DIR || __dirname;
