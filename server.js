@@ -20,7 +20,7 @@ const crypto = require('crypto');
 const PORT = process.env.PORT || 5000;
 const BASE_URL = process.env.BASE_URL || 'https://haloschool-production.up.railway.app';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-const DATABASE_PATH = process.env.DATABASE || './school.db';
+const DATABASE_PATH = process.env.DATABASE || '/app/data/school.db';
 
 let db;
 
