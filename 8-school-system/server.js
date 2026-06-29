@@ -403,8 +403,8 @@ function sendCredentials(schoolId, name, contact, login, pw, base) {
    ===================================================================== */
 const MIME = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".js": "text/javascript",
   ".png": "image/png", ".svg": "image/svg+xml", ".webmanifest": "application/manifest+json", ".ico": "image/x-icon" };
-const PAGES = { "/": "index.html", "/index.html": "index.html", "/super": "super.html", "/super.html": "super.html", "/admin": "admin.html", "/admin.html": "admin.html",
-  "/teacher": "teacher.html", "/teacher.html": "teacher.html", "/student": "student.html", "/student.html": "student.html", "/parent": "parent.html", "/parent.html": "parent.html" };
+const PAGES = { "/": "index.html", "/super": "super.html", "/admin": "admin.html",
+  "/teacher": "teacher.html", "/student": "student.html", "/parent": "parent.html" };
 function serveStatic(res, pathname) {
   const rel = PAGES[pathname] || pathname.replace(/^\/+/, "");
   const full = path.join(__dirname, "public", rel);
