@@ -15,12 +15,26 @@ const http = require('http');
 const Database = require('better-sqlite3');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 // Configuration
 const PORT = process.env.PORT || 5000;
 const BASE_URL = process.env.BASE_URL || 'https://haloschool-production.up.railway.app';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const DATABASE_PATH = process.env.DATABASE || '/app/data/school.db';
+const DATA_DIR = path.dirname(DATABASE_PATH);
+
+// Ensure data directory exists
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    console.log(`✓ Created data directory: ${DATA_DIR}`);
+  }
+} catch (e) {
+  console.error(`✗ Failed to create data directory: ${e.message}`);
+  process.exit(1);
+}
 
 let db;
 
