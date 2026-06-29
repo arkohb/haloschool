@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HaloSchool — Admin</title>
+<link rel="stylesheet" href="app.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#171410">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="HaloSchool">
+</head>
+<body>
+<header class="bar">
+  <button class="btn ghost sm hidden" id="backBtn" style="color:#fdf6e6;border-color:#4a443a;margin-right:.4rem" onclick="goBack()">← Back</button>
+  <img id="schoolLogo" class="hidden" alt="" style="height:26px;max-width:90px;object-fit:contain;border-radius:5px;margin-right:.45rem;background:#fff;padding:1px">
+  <div class="brand">Halo<span>School</span> 🎓</div>
+  <span class="who" id="who"></span>
+  <div class="spacer"></div>
+  <button class="btn ghost sm" style="color:#fdf6e6;border-color:#4a443a" onclick="logout()">Sign out</button>
+</header>
+
+<div class="wrap" id="app" class="hidden">
+  <div class="grid cols-3" id="stats"></div>
+  <div class="tabs" style="margin-top:1rem">
+    <div class="tab on" data-t="students" onclick="go('students')">🧑‍🎓 Students</div>
+    <div class="tab" data-t="teachers" onclick="go('teachers')">👩‍🏫 Teachers</div>
+    <div class="tab" data-t="classes" onclick="go('classes')">🏫 Classes</div>
+    <div class="tab" data-t="courses" onclick="go('courses')">📚 Courses</div>
+    <div class="tab" data-t="timetable" onclick="go('timetable')">🗓️ Timetable</div>
+    <div class="tab" data-t="exams" onclick="go('exams')">📝 Exams</div>
+    <div class="tab" data-t="invoices" onclick="go('invoices')">💳 Fees</div>
+    <div class="tab" data-t="notices" onclick="go('notices')">📣 Notices</div>
+    <div class="tab" data-t="promote" onclick="go('promote')">🎓 Promote</div>
+    <div class="tab" data-t="tabulation" onclick="go('tabulation')">📊 Tabulation</div>
+    <div class="tab" data-t="discipline" onclick="go('discipline')">🚫 Discipline</div>
+    <div class="tab" data-t="school" onclick="go('school')">⚙️ School</div>
+  </div>
+  <div id="cred" class="note hidden" style="margin-bottom:.8rem"></div>
+  <div id="view"></div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/report.js"></script>
+<script>
+const token=localStorage.getItem('school_token');
+const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+const api=(p,o={})=>fetch(p,{...o,headers:{...H,...(o.headers||{})}}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'error');return d;});
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.add('hidden'),4000);}
+function logout(){localStorage.clear();location.href='/';}
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let CUR='₵';const fmt=m=>CUR+(Number(m||0)/100).toLocaleString();
+let ME=null, TAB='students', CACHE={classes:[],teachers:[],students:[],exams:[],courses:[]};
+const DAYS=['','Mon','Tue','Wed','Thu','Fri'];
+
+async function guard(){if(!token){location.href='/';return false;}try{ME=await api('/api/me');}catch{localStorage.clear();location.href='/';return false;}
+  if(false if(ME.role!=='school_admin')if(ME.role!=='school_admin') ME.role!=='school_admin'){localStorage.clear();location.href='/';return false;}
+  if(ME.must_change_pw){location.href='/';return false;}
+  CUR=ME.school?.currency==='NGN'?'₦':'₵';
+  document.getElementById('who').textContent=ME.school?.name||'';
+  applyHeaderLogo();return true;}
+function applyHeaderLogo(){const im=document.getElementById('schoolLogo');if(!im)return;if(ME&&ME.school&&ME.school.logo){im.src=ME.school.logo;im.classList.remove('hidden');}else{im.classList.add('hidden');}}
+
+async function loadStats(){const o=await api('/api/admin/overview');
+  document.getElementById('stats').innerHTML=`
+   <div class="stat"><div class="k">Students</div><div class="v">${o.students}</div></div>
+   <div class="stat"><div class="k">Teachers</div><div class="v">${o.teachers}</div></div>
+   <div class="stat"><div class="k">Classes</div><div class="v">${o.classes}</div></div>
+   <div class="stat"><div class="k">Fees outstanding</div><div class="v" style="color:var(--accent)">${fmt(o.fees_due)}</div></div>
+   <div class="stat"><div class="k">Fees paid</div><div class="v" style="color:var(--k-green)">${fmt(o.fees_paid)}</div></div>`;}
+
+async function refreshCache(){
+  CACHE.classes=(await api('/api/admin/classes')).classes;
+  CACHE.teachers=(await api('/api/admin/teachers')).teachers;
+}
+function showCred(html){const c=document.getElementById('cred');c.innerHTML=html+' <button class="btn ghost sm" onclick="this.parentElement.classList.add(\'hidden\')">dismiss</button>';c.classList.remove('hidden');}
+function opt(list,val,label,sel){return '<option value="">—</option>'+list.map(x=>`<option value="${x[val]}" ${x[val]==sel?'selected':''}>${esc(x[label])}</option>`).join('');}
+
+let NAVHIST=[];
+function go(t,fromBack){if(!fromBack&&TAB&&TAB!==t)NAVHIST.push(TAB);TAB=t;document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));updateBack();render();}
+function goBack(){if(NAVHIST.length){go(NAVHIST.pop(),true);}}
+function updateBack(){const b=document.getElementById('backBtn');if(b)b.classList.toggle('hidden',NAVHIST.length===0);}
+async function render(){
+  const v=document.getElementById('view');v.innerHTML='<p class="muted">Loading…</p>';
+  if(TAB==='students')return renderStudents(v);
+  if(TAB==='teachers')return renderTeachers(v);
+  if(TAB==='classes')return renderClasses(v);
+  if(TAB==='courses')return renderCourses(v);
+  if(TAB==='timetable')return renderTimetable(v);
+  if(TAB==='exams')return renderExams(v);
+  if(TAB==='invoices')return renderInvoices(v);
+  if(TAB==='notices')return renderNotices(v);
+  if(TAB==='promote')return renderPromote(v);
+  if(TAB==='tabulation')return renderTabulation(v);
+  if(TAB==='discipline')return renderDiscipline(v);
+}
+async function renderTabulation(v){
+  const [{classes},{exams}]=await Promise.all([api('/api/admin/classes'),api('/api/admin/exams')]);
+  const classOpts=classes.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const examOpts=exams.map(e=>`<option value="${e.id}">${esc(e.name)} (${esc(e.term||'')})</option>`).join('');
+  v.innerHTML=`<div class="card"><h3>Tabulation sheet / Broadsheet</h3>
+    <div class="small muted" style="margin-bottom:.6rem">Generate a class results sheet for printing. Shows all students, all subjects, marks, grades, and class rankings.</div>
+    <div class="grid cols-2" style="gap:.6rem">
+      <div><label>Class</label><select id="tb_class">${classOpts||'<option>No classes</option>'}</select></div>
+      <div><label>Exam / Term (optional)</label><select id="tb_exam"><option value="">— All time —</option>${examOpts}</select></div>
+    </div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="loadTabulation()">Generate sheet</button></div>
+  </div>
+  <div id="tabView" style="margin-top:.9rem"></div>`;
+}
+async function loadTabulation(){
+  const cid=document.getElementById('tb_class').value;const eid=document.getElementById('tb_exam').value;
+  if(!cid){toast('Pick a class');return;}
+  try{
+    const url=`/api/admin/tabulation?class_id=${cid}${eid?'&exam_id='+eid:''}`;
+    const d=await api(url);
+    renderTabulationSheet(d);
+  }catch(e){toast(e.message);}
+}
+function renderTabulationSheet(d){
+  const {class:cl,exam,courses,students,results,school}=d;
+  const pct=(sc,mx)=>mx?Math.round(sc/mx*100):0;
+  const hasCA=(courses.length>0&&Object.values(results[courses[0].id]||{}).some(r=>r.ca_score!=null||r.exam_score!=null));
+  const hasExam=exam!=null;
+  // build table header
+  let th=`<th>Rank</th><th>Name</th><th>Admission</th>`;
+  if(hasCA){th+=`<th colspan="3" class="c">CA|Ex|Tot</th>`.repeat(courses.length);}
+  else{th+=`<th class="c">Score</th><th class="c">Grade</th>`.repeat(courses.length);}
+  th+=`<th class="c">Average</th>`;
+  // build table body
+  let tb=students.map(s=>{
+    let row=`<td class="c">${s.rank}</td><td><strong>${esc(s.name)}</strong></td><td class="small">${esc(s.admission_no||'')}</td>`;
+    for(const co of courses){
+      const r=results[co.id][s.id];
+      if(hasCA&&r){row+=`<td class="c">${r.ca_score||'—'}</td><td class="c">${r.exam_score||'—'}</td><td class="c"><strong>${r.score}</strong></td>`;}
+      else if(r){row+=`<td class="c">${r.score}</td><td class="c">${r.grade||''}</td>`;}
+      else{row+=`<td class="c">—</td><td class="c">—</td>`+(hasCA?`<td class="c">—</td>`:``);}
+    }
+    row+=`<td class="c">${s.average||'—'}</td></tr>`;
+    return row;
+  }).join('')||'<tr><td colspan="20" class="muted">No students in class</td></tr>';
+  // course headers
+  let coheader=`<th colspan="3"></th>`;
+  for(const co of courses){coheader+=hasCA?`<th colspan="3" class="c">${esc(co.name)}</th>`:`<th colspan="2" class="c">${esc(co.name)}</th>`;}
+  coheader+=`<th></th>`;
+  const html=`<style media="print">@page{margin:.5in;size:landscape}body{font-size:11px}table{width:100%;border-collapse:collapse;margin:1rem 0}.no-break{page-break-inside:avoid}th,td{border:1px solid #ccc;padding:4px;text-align:center}th{background:#f0f0f0;font-weight:bold}td.c{text-align:center}td.small{font-size:10px}h1,h2{margin:.3rem 0}.header{display:flex;justify-content:space-between;margin-bottom:.8rem;font-size:12px}</style>
+  <div class="no-break"><div class="header"><div><h2 style="margin:0">${esc(school.name)}</h2><div class="small">${esc(school.code||'')}</div></div>
+  <div style="text-align:right"><h3 style="margin:0">Tabulation Sheet</h3><div class="small">${esc(cl.name)}${exam?' · '+esc(exam.name):''}</div></div></div>
+  <table><thead><tr>${coheader}</tr><tr>${th}</tr></thead><tbody>${tb}</tbody></table></div>
+  <div style="margin-top:2rem;text-align:center;font-size:12px"><button class="btn" onclick="window.print()">Print</button></div>`;
+  document.getElementById('tabView').innerHTML=html;
+}
+
+/* ---- Discipline: Incident tracking ---- */
+async function renderDiscipline(v){
+  const {incidents}=await api('/api/incidents');
+  v.innerHTML=`<div class="card"><h3>Log an incident</h3><div class="grid cols-3">
+    <div><label>Student</label><select id="d_student">${opt(CACHE.students,'id','name')}</select></div>
+    <div><label>Date</label><input id="d_date" type="date" value="${new Date().toISOString().split('T')[0]}"></div>
+    <div><label>Incident type</label><select id="d_type">
+      <option>Lateness</option><option>Misbehavior</option><option>Property damage</option>
+      <option>Bullying</option><option>Cheating</option><option>Disrespect</option><option>Absence</option><option>Other</option>
+    </select></div>
+    <div><label>Severity</label><select id="d_sev"><option value="minor">Minor</option><option value="major">Major</option><option value="severe">Severe</option></select></div>
+    <div style="grid-column:1/-1"><label>Description</label><textarea id="d_desc" rows="2" placeholder="Details of incident..." style="width:100%;font:inherit;padding:.5rem;border:1px solid var(--line);border-radius:8px"></textarea></div>
+  </div>
+  <div style="margin-top:.8rem"><button class="btn green" onclick="logIncident()">Log incident</button></div></div>
+  <div class="card" style="margin-top:.9rem"><h3>Incident history</h3>
+    ${incidents.length?`<table><thead><tr><th>Student</th><th>Date</th><th>Type</th><th>Severity</th><th>Teacher</th><th>Action</th></tr></thead><tbody>
+    ${incidents.map(i=>`<tr><td><strong>${esc(i.student_name)}</strong></td><td>${esc(i.date)}</td>
+      <td>${esc(i.incident_type)}</td><td><span class="pill ${i.severity==='severe'?'due':i.severity==='major'?'locked':'released'}">${i.severity}</span></td>
+      <td class="small">${esc(i.teacher_name||'—')}</td><td><button class="btn ghost sm" onclick="openIncident(${i.id})">View</button></td></tr>`).join('')}
+    </tbody></table>`:'<p class="muted">No incidents recorded.</p>'}
+  </div>`;
+}
+async function logIncident(){
+  const student_id=Number(document.getElementById('d_student').value);
+  if(!student_id){toast('Select a student');return;}
+  const date=document.getElementById('d_date').value;
+  if(!date){toast('Select a date');return;}
+  try{
+    await api('/api/incidents',{method:'POST',body:JSON.stringify({student_id,date,incident_type:document.getElementById('d_type').value,severity:document.getElementById('d_sev').value,description:document.getElementById('d_desc').value})});
+    toast('Incident logged');render();
+  }catch(e){toast(e.message);}
+}
+async function openIncident(inc_id){
+  const {incident,consequences}=await api('/api/incidents/'+inc_id);
+  const wrap=document.createElement('div');
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:999;padding:1rem;overflow:auto';
+  wrap.innerHTML=`<div class="card" style="max-width:600px;width:100%;max-height:90vh;overflow:auto">
+    <h3 style="margin-top:0">${esc(incident.student_name)} — ${esc(incident.incident_type)}</h3>
+    <div class="grid cols-2" style="margin-bottom:1rem;gap:.5rem">
+      <div><strong>Date:</strong> ${esc(incident.date)}</div>
+      <div><strong>Severity:</strong> <span class="pill ${incident.severity==='severe'?'due':incident.severity==='major'?'locked':'released'}">${incident.severity}</span></div>
+      <div><strong>Reported by:</strong> ${esc(incident.teacher_name||'Admin')}</div>
+      <div><strong>Logged:</strong> ${new Date(incident.created_at).toLocaleDateString()}</div>
+    </div>
+    <div style="background:var(--bg-3);padding:1rem;border-radius:8px;margin-bottom:1rem">
+      <strong>Description:</strong><br><p>${esc(incident.description||'No description')}</p>
+    </div>
+    <h4>Consequences</h4>
+    ${consequences.length?`<div style="margin-bottom:1rem">${consequences.map(c=>`
+      <div style="border:1px solid var(--line);padding:.75rem;margin-bottom:.5rem;border-radius:8px">
+        <strong>${esc(c.consequence_type)}</strong> — <span class="pill ${c.status==='pending'?'due':'released'}">${c.status}</span>
+        <br><span class="small">${esc(c.description||'')}</span>
+        ${c.start_date?`<br><span class="small">Period: ${esc(c.start_date)} to ${esc(c.end_date||'—')}</span>`:''}
+      </div>
+    `).join('')}</div>`:'<p class="muted">No consequences yet.</p>'}
+    <div style="display:grid;grid-template-columns:1fr auto;gap:.5rem;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--line)">
+      <div>
+        <label>Add consequence</label>
+        <select id="cons_type" style="width:100%;padding:.5rem;border:1px solid var(--line);border-radius:8px">
+          <option>Warning</option><option>Detention</option><option>Cleaning duty</option>
+          <option>Parent meeting</option><option>Suspension</option><option>Expulsion</option>
+        </select>
+      </div>
+      <button class="btn green" onclick="addConsequence(${inc_id})" style="height:fit-content">Add</button>
+    </div>
+    <button class="btn ghost" onclick="this.parentElement.parentElement.remove()" style="width:100%;margin-top:1rem">Close</button>
+  </div>`;
+  document.body.appendChild(wrap);
+}
+async function addConsequence(inc_id){
+  const type=document.getElementById('cons_type').value;
+  try{
+    await api('/api/consequences',{method:'POST',body:JSON.stringify({incident_id:inc_id,consequence_type:type,description:''})});
+    toast('Consequence added');document.querySelector('[style*="position:fixed"]').remove();render();
+  }catch(e){toast(e.message);}
+}
+
+/* ---- Students ---- */
+async function renderStudents(v){
+  await refreshCache();
+  const {students}=await api('/api/admin/students');CACHE.students=students;
+  v.innerHTML=`<div class="card"><h3>Enroll a student</h3>
+    <div class="grid cols-2">
+      <div><label>Student name</label><input id="s_name"></div>
+      <div><label>Class</label><select id="s_class">${opt(CACHE.classes,'id','name')}</select></div>
+      <div><label>Grade</label><input id="s_grade" placeholder="JHS 1"></div>
+      <div><label>Section</label><input id="s_section" placeholder="A"></div>
+      <div><label>Student email (optional)</label><input id="s_email" type="email"></div>
+      <div><label>Student phone (optional)</label><input id="s_phone"></div>
+    </div>
+    <div class="divider"></div><div class="small muted">Optional parent/guardian (gets their own login + fee alerts)</div>
+    <div class="grid cols-3">
+      <div><label>Parent name</label><input id="p_name"></div>
+      <div><label>Parent email</label><input id="p_email" type="email"></div>
+      <div><label>Parent phone</label><input id="p_phone"></div>
+    </div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addStudent()">Enroll & create login</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem">
+      <table><thead><tr><th>Name</th><th>Adm. no</th><th>Class</th><th>Login</th><th>Parent</th><th></th></tr></thead>
+      <tbody>${students.map(s=>`<tr><td><strong>${esc(s.name)}</strong>${s.enrollment_status&&s.enrollment_status!=='enrolled'?` <span class="pill">${esc(s.enrollment_status)}</span>`:''}</td><td class="small">${esc(s.admission_no||'')}</td>
+        <td>${esc(s.class_name||'—')}</td><td class="small">${esc(s.login_id)}</td><td class="small">${esc(s.parent_name||'—')}</td>
+        <td><button class="btn ghost sm" onclick="reportCard(${s.id})">🖨️ Report</button>
+        <button class="btn ghost sm" onclick="remarksEditor(${s.id})">📝 Remarks</button>
+        <button class="btn ghost sm" onclick="generateIdCard(${s.id})">🆔 ID Card</button>
+        <button class="btn ghost sm" onclick="sendReport(${s.id})">📤 Send to parent</button></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No students yet</td></tr>'}</tbody></table></div>`;
+}
+async function addStudent(){
+  try{const r=await api('/api/admin/students',{method:'POST',body:JSON.stringify({
+    name:s_name.value,email:s_email.value,phone:s_phone.value,class_id:s_class.value||null,grade:s_grade.value,section:s_section.value,
+    parent_name:p_name.value,parent_email:p_email.value,parent_phone:p_phone.value})});
+    let msg=`✅ <b>${esc(s_name.value)}</b> enrolled. Student login: <span class="cred">${r.student_login}</span> password <span class="cred">${r.student_password}</span>`;
+    if(r.parent_login)msg+=`<br>Parent login: <span class="cred">${r.parent_login}</span> password <span class="cred">${r.parent_password}</span>`;
+    showCred(msg);loadStats();render();}catch(e){toast(e.message);}
+}
+/* ---- Teachers ---- */
+async function renderTeachers(v){
+  const {teachers}=await api('/api/admin/teachers');CACHE.teachers=teachers;
+  v.innerHTML=`<div class="card"><h3>Add a staff member</h3><div class="grid cols-3">
+    <div><label>Name</label><input id="t_name"></div>
+    <div><label>Email</label><input id="t_email" type="email"></div>
+    <div><label>Phone</label><input id="t_phone"></div>
+    <div><label>Qualifications (e.g. BSc Education)</label><input id="t_qual" placeholder="Degree, certifications"></div>
+    <div><label>Employment Status</label><select id="t_empstatus"><option value="active">Active</option><option value="contract">Contract</option><option value="pending">Pending</option><option value="leave">On Leave</option></select></div>
+    <div><label>Employment Date</label><input id="t_empdate" type="date"></div>
+    <div><label>Subjects</label><input id="t_sub" placeholder="Maths, Science"></div>
+    <div><label>Bio (optional)</label><input id="t_bio" placeholder="Brief bio"></div>
+  </div>
+  <div style="margin-top:.8rem"><button class="btn green" onclick="addTeacher()">Add staff member</button></div></div>
+  <div class="card" style="margin-top:.9rem"><h3>Staff directory</h3>
+  <table><thead><tr><th>Name</th><th>Qualifications</th><th>Status</th><th>Subjects</th><th>Classes</th><th>Action</th></tr></thead>
+  <tbody>${teachers.map(t=>`<tr><td><strong>${esc(t.name)}</strong><br><span class="small muted">${esc(t.email||'')}</span></td>
+    <td class="small">${esc(t.qualifications||'—')}</td>
+    <td><span class="pill ${t.employment_status==='active'?'released':t.employment_status==='contract'?'locked':'due'}">${esc(t.employment_status||'—')}</span></td>
+    <td class="small">${esc(t.subjects||'—')}</td>
+    <td class="small">${t.classes||0} / ${t.courses||0} courses</td>
+    <td><button class="btn ghost sm" onclick="editTeacher(${t.id})">✏️ Edit</button></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No staff yet</td></tr>'}</tbody></table>
+  </div>`;
+}
+async function addTeacher(){
+  try{const r=await api('/api/admin/teachers',{method:'POST',body:JSON.stringify({name:t_name.value,qualifications:t_qual.value,employment_status:t_empstatus.value,employment_date:t_empdate.value,phone:t_phone.value,subjects:t_sub.value,bio:t_bio.value,email:t_email.value})});
+    showCred(`✅ Staff member <b>${esc(t_name.value)}</b> added. Login: <span class="cred">${r.login_id}</span> password <span class="cred">${r.password}</span>`);render();}catch(e){toast(e.message);}
+}
+async function editTeacher(tid){
+  // load teacher and show edit modal
+  const {teachers}=await api('/api/admin/teachers');
+  const t=teachers.find(x=>x.id===tid);
+  if(!t){toast('Teacher not found');return;}
+  const wrap=document.createElement('div');
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:999;padding:1rem';
+  wrap.innerHTML=`<div class="card" style="max-width:500px;width:100%;max-height:90vh;overflow:auto">
+    <h3 style="margin-top:0">Edit ${esc(t.name)}</h3>
+    <label>Name</label><input id="et_name" value="${esc(t.name)}">
+    <label>Email</label><input id="et_email" type="email" value="${esc(t.email||'')}">
+    <label>Phone</label><input id="et_phone" value="${esc(t.phone||'')}">
+    <label>Qualifications</label><input id="et_qual" value="${esc(t.qualifications||'')}">
+    <label>Employment Status</label><select id="et_status"><option value="active" ${t.employment_status==='active'?'selected':''}>Active</option><option value="contract" ${t.employment_status==='contract'?'selected':''}>Contract</option><option value="pending" ${t.employment_status==='pending'?'selected':''}>Pending</option><option value="leave" ${t.employment_status==='leave'?'selected':''}>On Leave</option></select>
+    <label>Employment Date</label><input id="et_empdate" type="date" value="${t.employment_date||''}">
+    <label>Subjects</label><input id="et_sub" value="${esc(t.subjects||'')}">
+    <label>Bio</label><textarea id="et_bio" rows="2" style="width:100%;font:inherit;padding:.5rem;border:1px solid var(--line);border-radius:8px;background:var(--bg-3)">${esc(t.bio||'')}</textarea>
+    <div style="margin-top:1rem;display:flex;gap:.5rem"><button class="btn green" onclick="saveTeacher(${tid})">Save</button><button class="btn ghost" onclick="this.parentElement.parentElement.parentElement.remove()">Cancel</button></div>
+  </div>`;
+  document.body.appendChild(wrap);
+}
+async function saveTeacher(tid){
+  try{await api('/api/admin/teachers/'+tid,{method:'PUT',body:JSON.stringify({email:document.getElementById('et_email').value,phone:document.getElementById('et_phone').value,qualifications:document.getElementById('et_qual').value,employment_status:document.getElementById('et_status').value,employment_date:document.getElementById('et_empdate').value,subjects:document.getElementById('et_sub').value,bio:document.getElementById('et_bio').value})});
+    toast('Teacher profile updated');document.querySelector('[style*="position:fixed"]').remove();render();}catch(e){toast(e.message);}
+}
+/* ---- Classes ---- */
+async function renderClasses(v){
+  await refreshCache();const {classes}=await api('/api/admin/classes');
+  v.innerHTML=`<div class="card"><h3>Add a class</h3><div class="grid cols-3">
+    <div><label>Name</label><input id="c_name" placeholder="JHS 1"></div><div><label>Section</label><input id="c_section" placeholder="A"></div>
+    <div><label>Class teacher</label><select id="c_teacher">${opt(CACHE.teachers,'id','name')}</select></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addClass()">Add class</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><table><thead><tr><th>Class</th><th>Section</th><th>Teacher</th><th>Students</th></tr></thead>
+    <tbody>${classes.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.section||'')}</td><td>${esc(c.teacher_name||'—')}</td><td>${c.students}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No classes</td></tr>'}</tbody></table></div>`;
+}
+async function addClass(){try{await api('/api/admin/classes',{method:'POST',body:JSON.stringify({name:c_name.value,section:c_section.value,teacher_id:c_teacher.value||null})});toast('Class added');loadStats();render();}catch(e){toast(e.message);}}
+/* ---- Courses ---- */
+async function renderCourses(v){
+  await refreshCache();const {courses}=await api('/api/admin/courses');
+  v.innerHTML=`<div class="card"><h3>Add a course</h3><div class="grid cols-2">
+    <div><label>Course name</label><input id="co_name" placeholder="Mathematics"></div><div><label>Code</label><input id="co_code" placeholder="MATH"></div>
+    <div><label>Class</label><select id="co_class">${opt(CACHE.classes,'id','name')}</select></div>
+    <div><label>Teacher</label><select id="co_teacher">${opt(CACHE.teachers,'id','name')}</select></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addCourse()">Add course</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><table><thead><tr><th>Course</th><th>Code</th><th>Class</th><th>Teacher</th></tr></thead>
+    <tbody>${courses.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.code||'')}</td><td>${esc(c.class_name||'—')}</td><td>${esc(c.teacher_name||'—')}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No courses</td></tr>'}</tbody></table></div>`;
+}
+async function addCourse(){try{await api('/api/admin/courses',{method:'POST',body:JSON.stringify({name:co_name.value,code:co_code.value,class_id:co_class.value||null,teacher_id:co_teacher.value||null})});toast('Course added');render();}catch(e){toast(e.message);}}
+/* ---- Timetable ---- */
+async function renderTimetable(v){
+  await refreshCache();
+  v.innerHTML=`<div class="card"><div class="row"><label style="margin:0">Class</label>
+    <select id="tt_class" onchange="loadTT()" style="max-width:200px">${opt(CACHE.classes,'id','name')}</select></div>
+    <div id="ttGrid" style="margin-top:.8rem"></div></div>`;
+}
+async function loadTT(){
+  const cid=tt_class.value;if(!cid){document.getElementById('ttGrid').innerHTML='';return;}
+  const {slots}=await api('/api/admin/timetable?class_id='+cid);
+  const courses=(await api('/api/admin/courses')).courses.filter(c=>c.class_id==cid);
+  const byKey={};slots.forEach(s=>byKey[s.day+'-'+s.period]=s);
+  let grid='<div class="tt-grid"><div class="hd">Period</div>'+DAYS.slice(1).map(d=>`<div class="hd">${d}</div>`).join('');
+  for(let pr=1;pr<=6;pr++){grid+=`<div class="hd">P${pr}</div>`;for(let d=1;d<=5;d++){const s=byKey[d+'-'+pr];grid+=`<div>${s?esc(s.course_name||'—'):'·'}</div>`;}}
+  grid+='</div>';
+  grid+=`<div class="divider"></div><div class="grid cols-3">
+    <div><label>Day</label><select id="tt_day">${[1,2,3,4,5].map(d=>`<option value="${d}">${DAYS[d]}</option>`).join('')}</select></div>
+    <div><label>Period</label><select id="tt_period">${[1,2,3,4,5,6].map(p=>`<option value="${p}">P${p}</option>`).join('')}</select></div>
+    <div><label>Course</label><select id="tt_course">${opt(courses,'id','name')}</select></div></div>
+    <div class="row" style="margin-top:.5rem"><input id="tt_start" placeholder="08:00" style="max-width:110px"><input id="tt_end" placeholder="08:45" style="max-width:110px">
+    <button class="btn sm green" onclick="addSlot()">Add slot</button></div>`;
+  document.getElementById('ttGrid').innerHTML=grid;
+}
+async function addSlot(){try{await api('/api/admin/timetable',{method:'POST',body:JSON.stringify({class_id:tt_class.value,day:tt_day.value,period:tt_period.value,course_id:tt_course.value||null,start_time:tt_start.value,end_time:tt_end.value})});toast('Slot added');loadTT();}catch(e){toast(e.message);}}
+/* ---- Exams ---- */
+async function renderExams(v){
+  await refreshCache();const {exams}=await api('/api/admin/exams');
+  v.innerHTML=`<div class="card"><h3>Create an exam</h3><div class="grid cols-3">
+    <div><label>Name</label><input id="e_name" placeholder="End of Term 1"></div><div><label>Term</label><input id="e_term" placeholder="Term 1"></div>
+    <div><label>Class</label><select id="e_class">${opt(CACHE.classes,'id','name')}</select></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addExam()">Create exam</button></div></div>
+    <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><table><thead><tr><th>Exam</th><th>Term</th><th>Class</th></tr></thead>
+    <tbody>${exams.map(e=>`<tr><td><strong>${esc(e.name)}</strong></td><td>${esc(e.term||'')}</td><td>${esc(e.class_name||'—')}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">No exams</td></tr>'}</tbody></table></div>`;
+}
+async function addExam(){try{await api('/api/admin/exams',{method:'POST',body:JSON.stringify({name:e_name.value,term:e_term.value,class_id:e_class.value||null})});toast('Exam created');render();}catch(e){toast(e.message);}}
+/* ---- Invoices ---- */
+async function renderInvoices(v){
+  if(!CACHE.students.length)CACHE.students=(await api('/api/admin/students')).students;
+  const [{invoices,currency},{school}]=await Promise.all([api('/api/admin/invoices'),api('/api/admin/school')]);
+  CUR=currency==='NGN'?'₦':'₵';
+  // calculate totals
+  const total_due=invoices.reduce((s,i)=>s+i.amount_due_minor,0);
+  const total_paid=invoices.reduce((s,i)=>s+(i.amount_paid_minor||0),0);
+  const outstanding=total_due-total_paid;
+  v.innerHTML=`<div style="text-align:center;margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:2px solid var(--k-gold)">
+    ${school.logo?`<img src="${school.logo}" alt="School logo" style="height:60px;margin-bottom:.5rem">`:`<div style="width:60px;height:60px;margin:0 auto .5rem;background:var(--k-gold);border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:bold;color:#171410;font-size:24px">${school.name.charAt(0)}</div>`}
+    <h3 style="margin:.3rem 0;color:#171410">${esc(school.name)}</h3>
+    ${school.contact_phone?`<div class="small muted">${esc(school.contact_phone)}</div>`:''}
+    ${school.address?`<div class="small muted">${esc(school.address)}</div>`:''}
+  </div>
+  <div class="grid cols-3" style="margin-bottom:1rem">
+    <div class="stat"><div class="k">Total due</div><div class="v">${CUR}${(total_due/100).toLocaleString()}</div></div>
+    <div class="stat"><div class="k">Paid</div><div class="v" style="color:var(--k-green)">${CUR}${(total_paid/100).toLocaleString()}</div></div>
+    <div class="stat"><div class="k">Outstanding</div><div class="v" style="color:var(--bad)">${CUR}${(outstanding/100).toLocaleString()}</div></div></div>
+  <div class="card"><h3>Create a fee invoice</h3><div class="grid cols-2">
+    <div><label>Student</label><select id="i_student">${opt(CACHE.students,'id','name')}</select></div>
+    <div><label>Amount (${CUR})</label><input id="i_amount" type="number" min="1"></div>
+    <div><label>Title</label><input id="i_title" placeholder="Term 1 fees"></div>
+    <div><label>Term</label><input id="i_term" placeholder="Term 1"></div>
+    <div><label>Due date</label><input id="i_due" type="date"></div></div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="addInvoice()">Create invoice</button></div></div>
+  <div class="card" style="margin-top:.9rem"><h3>Fee reminders</h3>
+    <div style="display:flex;gap:.5rem;margin-bottom:1rem">
+      <select id="r_student" style="flex:1;padding:.5rem;border:1px solid var(--line);border-radius:8px"><option>Send reminder to student...</option>${CACHE.students.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+      <button class="btn green" onclick="sendFeeReminder()">Send SMS</button>
+    </div>
+    <p class="small muted">Send automated SMS to parent reminding them of outstanding fees.</p>
+  </div>
+  <div class="card" style="margin-top:.9rem;padding:.4rem .6rem"><h3>Invoice history</h3>
+    <table><thead><tr><th>Student</th><th>Title</th><th>Amount</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead>
+    <tbody>${invoices.map(i=>{const bal=i.amount_due_minor-(i.amount_paid_minor||0);return `<tr><td><strong>${esc(i.student_name)}</strong><div class="small muted">${esc(i.admission_no||'')}</div></td>
+      <td>${esc(i.title||'')}</td><td>${CUR}${(i.amount_due_minor/100).toLocaleString()}</td><td style="color:var(--k-green)">${CUR}${((i.amount_paid_minor||0)/100).toLocaleString()}</td>
+      <td style="color:${bal>0?'var(--bad)':'var(--k-green)'}">${CUR}${(bal/100).toLocaleString()}</td>
+      <td><span class="pill ${i.status==='paid'?'released':i.status==='partial'?'locked':'due'}">${i.status}</span></td></tr>`;}
+    ).join('')||'<tr><td colspan="6" class="muted">No invoices</td></tr>'}</tbody></table></div>`;
+}
+async function addInvoice(){try{await api('/api/admin/invoices',{method:'POST',body:JSON.stringify({student_id:i_student.value,amount:i_amount.value,title:i_title.value,term:i_term.value,due_date:i_due.value})});toast('Invoice created — parent notified');loadStats();render();}catch(e){toast(e.message);}}
+async function sendFeeReminder(){
+  const student_id=document.getElementById('r_student').value;
+  if(!student_id){toast('Select a student');return;}
+  try{const r=await api('/api/fee-reminders/send',{method:'POST',body:JSON.stringify({student_id})});
+    toast(`Reminder sent to ${r.sent} outstanding invoice(s)`);document.getElementById('r_student').value='';
+  }catch(e){toast(e.message);}
+}
+
+/* ---- printable report card ---- */
+async function reportCard(sid){
+  try{const d=await api('/api/report/'+sid);
+    const rows=d.results.map(r=>`<tr><td>${esc(r.course||'')}</td><td>${esc(r.exam||'')}</td><td>${r.score}/${r.max_score}</td><td>${esc(r.grade||'')}</td></tr>`).join('')||'<tr><td colspan="4">No results yet</td></tr>';
+    const att=d.attendance;const tot=att.present+att.absent+att.late;
+    const w=window.open('','_blank');
+    w.document.write(`<html><head><title>Report card — ${esc(d.student.name)}</title>
+      <style>body{font-family:sans-serif;max-width:680px;margin:24px auto;color:#1a1712}h1{color:#d99b16}
+      table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #e2d6bd;padding:8px;text-align:left}
+      .head{display:flex;justify-content:space-between;border-bottom:3px solid #171410;padding-bottom:8px}</style></head>
+      <body><div class="head"><div><h1>${esc(d.school.name)}</h1><div>Report Card</div></div>
+      <div style="text-align:right"><div><b>${esc(d.student.name)}</b></div><div>${esc(d.student.admission_no||'')}</div><div>${esc(d.student.class_name||'')}</div></div></div>
+      <table><thead><tr><th>Course</th><th>Exam</th><th>Score</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table>
+      <p style="margin-top:14px">Attendance: <b>${att.present}</b> present, <b>${att.absent}</b> absent, <b>${att.late}</b> late${tot?` (${Math.round(att.present/tot*100)}% present)`:''}.</p>
+      <p style="color:#777;font-size:12px">Generated by HaloSchool</p>
+      <script>window.print()<\/script>
+</body></html>`);w.document.close();
+  }catch(e){toast(e.message);}
+}
+/* ===== School profile (logo + details) ===== */
+const IMG={logo:undefined,banner:undefined,signature:undefined}; // undefined=unchanged, ''=cleared, dataURL=new
+function renderSchool(v){
+  const s=ME.school||{};
+  const imgField=(key,label,hint,max)=>`
+    <label>${label}</label>
+    <div style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap">
+      <img id="sc_${key}_prev" class="${s[key]?'':'hidden'}" src="${s[key]||''}" style="${key==='banner'?'height:48px;max-width:200px':'width:60px;height:60px'};border-radius:8px;object-fit:contain;border:1px solid var(--line);background:#fff">
+      <button class="btn ghost sm" onclick="document.getElementById('sc_${key}_file').click()">Upload</button>
+      <button class="btn ghost sm ${s[key]?'':'hidden'}" id="sc_${key}_clear" onclick="clearImg('${key}')">Remove</button>
+      <input id="sc_${key}_file" type="file" accept="image/*" class="hidden" onchange="pickImg(this,'${key}',${max})">
+    </div>
+    <div class="small muted" style="margin:.25rem 0 .6rem">${hint}</div>`;
+  v.innerHTML=`<div class="card">
+    <h3 style="margin-top:0">School profile</h3>
+    <div class="grid cols-2">
+      <div><label>School name</label><input id="sc_name" value="${esc(s.name||'')}"></div>
+      <div><label>School code</label><input value="${esc(s.code||'')}" disabled></div>
+      <div><label>Contact phone</label><input id="sc_phone" value="${esc(s.contact_phone||'')}"></div>
+      <div><label>Contact email</label><input id="sc_email" value="${esc(s.contact_email||'')}"></div>
+      <div><label>Currency</label><select id="sc_cur"><option value="GHS"${s.currency==='GHS'?' selected':''}>GHS (₵)</option><option value="NGN"${s.currency==='NGN'?' selected':''}>NGN (₦)</option></select></div>
+      <div><label>Motto</label><input id="sc_motto" value="${esc(s.motto||'')}" placeholder="e.g. Knowledge is Light"></div>
+    </div>
+    <label>Address</label><textarea id="sc_addr" rows="2" style="width:100%;font:inherit;padding:.55rem;border:1px solid var(--line);border-radius:8px;background:var(--bg-3)">${esc(s.address||'')}</textarea>
+    ${imgField('logo','School logo','Shown in your header and on report cards. Square works best.',256)}
+    <div class="divider"></div>
+    <h3 style="margin-top:.4rem">Term / report card</h3>
+    <div class="grid cols-3">
+      <div><label>Class score weight</label><input id="sc_caw" type="number" min="0" max="100" value="${s.ca_weight??30}"></div>
+      <div><label>Exam weight</label><input id="sc_examw" type="number" min="0" max="100" value="${s.exam_weight??70}"></div>
+      <div><label>Next term begins</label><input id="sc_nextterm" value="${esc(s.next_term||'')}" placeholder="e.g. 14 Jan 2027"></div>
+    </div>
+    <div class="small muted" style="margin:.2rem 0 .6rem">Continuous assessment: teachers enter a class score (out of the first weight) and exam score (out of the second). They should add up to 100.</div>
+    ${imgField('banner','Report banner (optional)','A wide letterhead image printed across the top of the report card.',1000)}
+    <div class="grid cols-2">
+      <div><label>Head teacher's name</label><input id="sc_head" value="${esc(s.head_name||'')}" placeholder="e.g. Mrs. A. Mensah"></div>
+    </div>
+    ${imgField('signature','Head teacher signature (optional)','A PNG of the signature, printed above the head teacher name.',400)}
+    <label>Report footer note</label><textarea id="sc_footer" rows="2" style="width:100%;font:inherit;padding:.55rem;border:1px solid var(--line);border-radius:8px;background:var(--bg-3)" placeholder="e.g. Next term begins 14 Jan 2027">${esc(s.report_footer||'')}</textarea>
+    <div class="divider"></div>
+    <h3 style="margin-top:.4rem">Custom template <span class="small muted">(advanced — optional)</span></h3>
+    <div class="small muted" style="margin-bottom:.4rem">Leave empty to use the branded layout above. Paste your own HTML for an exact custom design. Use these placeholders: <code>{{school_name}} {{school_motto}} {{school_address}} {{school_phone}} {{school_email}} {{logo_url}} {{banner_url}} {{student_name}} {{admission_no}} {{class_name}} {{position}} {{average}} {{attendance_rate}} {{term}} {{results_table}} {{results_rows}} {{grading_key}} {{head_name}} {{signature_url}} {{remark}} {{date}} {{footer}}</code></div>
+    <textarea id="sc_tpl" rows="6" spellcheck="false" style="width:100%;font:12px ui-monospace,monospace;padding:.55rem;border:1px solid var(--line);border-radius:8px;background:var(--bg-3)" placeholder="(empty = use branded default)">${esc(s.report_template||'')}</textarea>
+    <div style="margin-top:.4rem"><button class="btn ghost sm" onclick="loadDefaultTpl()">Load default as starting point</button></div>
+    <div style="margin-top:1rem"><button class="btn green" onclick="saveSchool()">Save school profile</button>
+      <button class="btn ghost" style="margin-left:.5rem" onclick="previewReport()">Preview report card</button></div>
+    <div class="small muted" style="margin-top:.4rem">Grading uses the standard A–F scale and shows the key on each report. (Scripts in custom templates are stripped for safety.)</div>
+  </div>`;
+}
+function pickImg(input,key,max){const f=input.files[0];if(!f)return;const img=new Image();const rd=new FileReader();
+  rd.onload=()=>{img.onload=()=>{let w=img.width,h=img.height;const sc=Math.min(1,max/Math.max(w,h));
+    const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(w*sc));cv.height=Math.max(1,Math.round(h*sc));
+    cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);IMG[key]=cv.toDataURL('image/png');
+    const pv=document.getElementById('sc_'+key+'_prev');if(pv){pv.src=IMG[key];pv.classList.remove('hidden');}
+    const cl=document.getElementById('sc_'+key+'_clear');if(cl)cl.classList.remove('hidden');};img.src=rd.result;};rd.readAsDataURL(f);}
+function clearImg(key){IMG[key]='';const pv=document.getElementById('sc_'+key+'_prev');if(pv){pv.src='';pv.classList.add('hidden');}}
+async function saveSchool(){try{
+  const g=id=>{const e=document.getElementById(id);return e?e.value.trim():'';};
+  const body={name:g('sc_name'),contact_phone:g('sc_phone'),contact_email:g('sc_email'),address:g('sc_addr'),currency:document.getElementById('sc_cur').value,motto:g('sc_motto'),head_name:g('sc_head'),report_footer:g('sc_footer'),report_template:g('sc_tpl')||null,ca_weight:Number(g('sc_caw')||30),exam_weight:Number(g('sc_examw')||70),next_term:g('sc_nextterm')};
+  if(!body.name){toast('School name is required');return;}
+  if(IMG.logo!==undefined)body.logo=IMG.logo||null;
+  if(IMG.banner!==undefined)body.banner=IMG.banner||null;
+  if(IMG.signature!==undefined)body.head_signature=IMG.signature||null;
+  const r=await api('/api/admin/school',{method:'PUT',body:JSON.stringify(body)});
+  ME.school=r.school;IMG.logo=IMG.banner=IMG.signature=undefined;
+  document.getElementById('who').textContent=ME.school?.name||'';
+  CUR=ME.school?.currency==='NGN'?'₦':'₵';
+  applyHeaderLogo();
+  toast('School profile saved');
+}catch(e){toast(e.message);}}
+async function renderPromote(v){
+  const [{classes},{school}]=await Promise.all([api('/api/admin/classes'),api('/api/admin/school')]);
+  const classOpts=classes.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  v.innerHTML=`
+  <div class="card"><h3 style="margin-top:0">Academic year</h3>
+    <div class="row" style="gap:.6rem;align-items:flex-end">
+      <div style="flex:1"><label>Current academic year</label><input id="ay" value="${esc(school.academic_year||'')}" placeholder="e.g. 2025/2026"></div>
+      <button class="btn ghost" onclick="saveYear()">Save</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:.9rem"><h3>Promotion path</h3>
+    <div class="small muted" style="margin-bottom:.5rem">Set which class each one promotes into. Leave as "Graduate" for your final class.</div>
+    <table><thead><tr><th>Class</th><th>Promotes to</th><th>Students</th></tr></thead><tbody>
+    ${classes.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td>
+      <td><select onchange="setNext(${c.id},this.value)"><option value="">— Graduate —</option>${classes.filter(x=>x.id!==c.id).map(x=>`<option value="${x.id}"${c.next_class_id==x.id?' selected':''}>${esc(x.name)}</option>`).join('')}</select></td>
+      <td class="small">${c.students}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">Create classes first</td></tr>'}
+    </tbody></table>
+  </div>
+  <div class="card" style="margin-top:.9rem"><h3>Promote a single class</h3>
+    <div class="row" style="gap:.6rem;align-items:flex-end">
+      <div style="flex:1"><label>Class</label><select id="pc">${classOpts}</select></div>
+      <button class="btn" onclick="loadPromote()">Load students</button>
+    </div>
+    <div id="promoteList" style="margin-top:.7rem"></div>
+  </div>
+  <div class="card" style="margin-top:.9rem;border:1px solid var(--k-gold)"><h3>🎓 End-of-year rollover</h3>
+    <div class="small muted">Promotes <b>every</b> class to the next at once, graduates your final class, carries fee arrears over, and clears the term's report flags &amp; remarks for a fresh year. Set the promotion path above first.</div>
+    <div class="row" style="gap:.6rem;align-items:flex-end;margin-top:.6rem">
+      <div style="flex:1"><label>New academic year</label><input id="newyear" placeholder="e.g. 2026/2027"></div>
+      <button class="btn green" onclick="runRollover()">Run rollover</button>
+    </div>
+  </div>`;
+}
+async function saveYear(){try{await api('/api/admin/school',{method:'PUT',body:JSON.stringify({academic_year:document.getElementById('ay').value})});toast('Academic year saved');}catch(e){toast(e.message);}}
+async function setNext(cid,val){try{await api('/api/admin/classes/'+cid,{method:'PUT',body:JSON.stringify({next_class_id:val||null})});toast('Promotion path updated');}catch(e){toast(e.message);}}
+async function loadPromote(){
+  const cid=document.getElementById('pc').value;if(!cid){toast('Pick a class');return;}
+  const d=await api('/api/admin/promote?class_id='+cid);const cur=CUR;
+  document.getElementById('promoteList').innerHTML=`
+    <div class="small muted" style="margin-bottom:.4rem">Promotes to: <b>${esc(d.next_class_name||'Graduate (final class)')}</b></div>
+    <table><thead><tr><th>Student</th><th>Owing</th><th>Action</th></tr></thead><tbody>
+    ${d.students.map(s=>`<tr><td>${esc(s.name)} <span class="small muted">${esc(s.admission_no||'')}</span></td>
+      <td class="small ${s.balance_minor>0?'':'muted'}">${s.balance_minor>0?cur+(s.balance_minor/100).toLocaleString():'—'}</td>
+      <td><select id="act_${s.id}">
+        <option value="promote">Promote${d.next_class_name?'':' → Graduate'}</option>
+        <option value="repeat">Repeat</option>
+        <option value="graduate">Graduate</option>
+        <option value="withdraw">Withdraw</option>
+      </select></td></tr>`).join('')||'<tr><td colspan="3" class="muted">No students in this class</td></tr>'}
+    </tbody></table>
+    ${d.students.length?`<div style="margin-top:.7rem"><button class="btn green" onclick="applyPromote(${cid},${JSON.stringify(d.students.map(s=>s.id))})">Apply to class</button>
+      <span class="small muted" style="margin-left:.5rem">Outstanding fees follow each student automatically.</span></div>`:''}`;
+}
+async function applyPromote(cid,ids){
+  try{if(!confirm('Apply these promotion decisions to the class?'))return;
+    const decisions=ids.map(id=>({student_id:id,action:document.getElementById('act_'+id).value}));
+    const r=await api('/api/admin/promote',{method:'POST',body:JSON.stringify({class_id:cid,decisions,reset_term:true})});
+    toast(`Promoted ${r.promoted}, repeated ${r.repeated}, graduated ${r.graduated}, withdrawn ${r.withdrawn}`);render();
+  }catch(e){toast(e.message);}
+}
+async function runRollover(){
+  if(!confirm('Run end-of-year rollover? This promotes ALL classes, graduates your final class, and starts a fresh term. Make sure your promotion path is set.'))return;
+  try{const ny=document.getElementById('newyear').value.trim();
+    const r=await api('/api/admin/rollover',{method:'POST',body:JSON.stringify({new_year:ny||undefined,reset_term:true})});
+    toast(`Rollover done — ${r.promoted} promoted, ${r.graduated} graduated`);render();loadStats();
+  }catch(e){toast(e.message);}
+}
+async function renderNotices(v){
+  const {announcements}=await api('/api/announcements');
+  v.innerHTML=`<div class="card"><h3>Post an announcement</h3>
+    <label>Title</label><input id="an_title" placeholder="e.g. Mid-term break begins Friday">
+    <label>Message</label><textarea id="an_body" rows="3" style="width:100%;font:inherit;padding:.5rem;border:1px solid var(--line);border-radius:8px;background:var(--bg-3)"></textarea>
+    <div class="grid cols-2">
+      <div><label>Audience</label><select id="an_aud"><option value="all">Everyone</option><option value="parents">Parents only</option><option value="students">Students only</option><option value="teachers">Teachers only</option></select></div>
+      <div><label>&nbsp;</label><label style="display:flex;align-items:center;gap:.4rem;font-weight:400;padding-top:.5rem"><input type="checkbox" id="an_cast"> Also send by SMS + email</label></div>
+    </div>
+    <div style="margin-top:.8rem"><button class="btn green" onclick="postNotice()">Post announcement</button></div></div>
+    <div class="card" style="margin-top:.9rem"><h3>Recent announcements</h3>
+    ${announcements.length?announcements.map(a=>`<div style="border-bottom:1px solid var(--line);padding:.6rem 0">
+      <div class="row" style="justify-content:space-between;align-items:flex-start"><strong>${esc(a.title)}</strong><button class="btn ghost sm" onclick="delNotice(${a.id})">Delete</button></div>
+      <div class="small" style="white-space:pre-wrap;margin:.2rem 0">${esc(a.body||'')}</div>
+      <div class="small muted">${esc(a.audience)} · ${esc(a.author||'')} · ${new Date((a.created_at||'').replace(' ','T')+'Z').toLocaleString()}</div></div>`).join(''):'<p class="muted">No announcements yet.</p>'}</div>`;
+}
+async function postNotice(){try{
+  const title=document.getElementById('an_title').value.trim();if(!title){toast('Enter a title');return;}
+  const r=await api('/api/admin/announcements',{method:'POST',body:JSON.stringify({title,body:document.getElementById('an_body').value,audience:document.getElementById('an_aud').value,broadcast:document.getElementById('an_cast').checked})});
+  toast(r.sent?('Posted + sent to '+r.sent+' people'):'Announcement posted');render();
+}catch(e){toast(e.message);}}
+async function delNotice(id){try{await api('/api/admin/announcements/'+id,{method:'DELETE'});render();}catch(e){toast(e.message);}}
+async function generateIdCard(sid){try{const d=await api('/api/admin/student-card?student_id='+sid);renderIdCard(d);}catch(e){toast(e.message);}}
+function renderIdCard(d){
+  const {student:st,school}=d;
+  const initials=(st.name||'').split(' ').map(w=>w[0]||'').join('').slice(0,2).toUpperCase();
+  const qr=`${location.origin}?sid=${st.id}`;
+  const html=`<style media="print">@page{margin:0;size:A4}body{margin:0;padding:12px;background:#fff;font-family:sans-serif}.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.card-wrap{page-break-inside:avoid;width:100%}.card{width:100%;aspect-ratio:85.6/53.98;background:linear-gradient(135deg,#171410 0%,#2a2319 100%);border-radius:8px;padding:12px;box-sizing:border-box;display:flex;flex-direction:column;color:#fdf6e6;position:relative;overflow:hidden;border:2px solid #d99b16;box-shadow:0 4px 6px rgba(0,0,0,0.3)}.card::before{content:'';position:absolute;top:0;right:0;width:80px;height:80px;background:radial-gradient(circle,rgba(217,155,22,0.1) 0%,transparent 70%);border-radius:50%}.card-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;position:relative;z-index:1}.school-logo{width:40px;height:40px;background:#fdf6e6;border-radius:4px;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:10px;color:#171410;flex-shrink:0;overflow:hidden}.school-logo img{width:100%;height:100%;object-fit:contain;padding:2px}.school-name{font-size:9px;font-weight:bold;color:#d99b16;line-height:1.2}.card-body{flex:1;display:flex;gap:8px;position:relative;z-index:1}.photo-box{width:48px;height:60px;background:#d99b16;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0}.photo-initials{font-size:18px;font-weight:bold;color:#171410}.card-info{flex:1;display:flex;flex-direction:column;justify-content:space-between;font-size:9px}.student-name{font-weight:bold;font-size:11px;color:#d99b16;margin-bottom:2px}.label{font-size:7px;color:#a89985;text-transform:uppercase;letter-spacing:0.5px}.value{font-size:8px;color:#fdf6e6;margin-bottom:3px}.card-footer{display:flex;align-items:center;justify-content:space-between;position:relative;z-index:1;margin-top:6px}.qr-placeholder{width:32px;height:32px;background:#fdf6e6;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:6px;color:#171410}.issued{font-size:7px;color:#a89985}</style>
+  <div class="cards">`;
+  // single card for now (can extend to print batch)
+  const cardHtml=`<div class="card-wrap"><div class="card">
+    <div class="card-header">
+      <div class="school-logo">${school.logo?`<img src="${school.logo}" alt="School logo">`:`<div>${school.name.charAt(0)}</div>`}</div>
+      <div class="school-name">${esc(school.name)}<br>Student ID</div>
+    </div>
+    <div class="card-body">
+      <div class="photo-box"><div class="photo-initials">${initials}</div></div>
+      <div class="card-info">
+        <div>
+          <div class="student-name">${esc(st.name)}</div>
+          <div><span class="label">ID:</span> <span class="value">${esc(st.admission_no||'—')}</span></div>
+          <div><span class="label">Class:</span> <span class="value">${esc(st.class_name||'—')}</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-footer">
+      <div class="qr-placeholder">${st.id}</div>
+      <div class="issued">${new Date().getFullYear()}</div>
+    </div>
+  </div></div>`;
+  const fullHtml=html+cardHtml+'</div><div style="margin-top:2rem;text-align:center"><button class="btn" onclick="window.print()">Print ID Card</button></div>';
+  const wrap=document.createElement('div');
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:999;padding:1rem;overflow:auto';
+  const content=document.createElement('div');
+  content.className='card';
+  content.style.cssText='max-width:600px;width:100%;max-height:90vh;overflow:auto;background:#fff;color:#000;padding:1.5rem';
+  content.innerHTML=`<button class="btn ghost" onclick="this.parentElement.parentElement.remove()" style="position:absolute;top:.5rem;right:.5rem">✕</button>
+    <h3 style="margin-top:0">ID Card — ${esc(st.name)}</h3>
+    <div style="border:1px solid #ccc;border-radius:8px;padding:1rem;background:#f9f9f9;margin-bottom:1rem">${fullHtml}</div>`;
+  wrap.appendChild(content);
+  document.body.appendChild(wrap);
+}
+async function reportCard(sid){try{const d=await api('/api/report/'+sid);if(window.printReportCard)printReportCard(d);else toast('Report module not loaded');}catch(e){toast(e.message);}}
+async function remarksEditor(sid){
+  let cur={};try{const d=await api('/api/report/'+sid);cur=d.student||{};}catch(e){}
+  const wrap=document.createElement('div');
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:999;padding:1rem';
+  wrap.innerHTML=`<div class="card" style="max-width:430px;width:100%;max-height:90vh;overflow:auto">
+    <h3 style="margin-top:0">Report remarks — ${esc(cur.name||'')}</h3>
+    <label>Conduct</label><input id="rm_conduct" value="${esc(cur.conduct||'')}" placeholder="e.g. Excellent">
+    <label>Attitude</label><input id="rm_attitude" value="${esc(cur.attitude||'')}" placeholder="e.g. Respectful and cooperative">
+    <label>Interest</label><input id="rm_interest" value="${esc(cur.interest||'')}" placeholder="e.g. Keen on Science">
+    <label>Class teacher's remark</label><textarea id="rm_remark" rows="3" style="width:100%;font:inherit;padding:.5rem;border:1px solid var(--line);border-radius:8px;background:var(--bg-3)">${esc(cur.class_remark||'')}</textarea>
+    <div style="margin-top:.9rem;display:flex;gap:.5rem"><button class="btn green" id="rm_save">Save remarks</button><button class="btn ghost" id="rm_cancel">Cancel</button></div>
+  </div>`;
+  document.body.appendChild(wrap);
+  const close=()=>wrap.remove();
+  wrap.querySelector('#rm_cancel').onclick=close;
+  wrap.onclick=e=>{if(e.target===wrap)close();};
+  wrap.querySelector('#rm_save').onclick=async()=>{try{
+    await api('/api/admin/students/'+sid+'/remarks',{method:'PUT',body:JSON.stringify({conduct:document.getElementById('rm_conduct').value,attitude:document.getElementById('rm_attitude').value,interest:document.getElementById('rm_interest').value,class_remark:document.getElementById('rm_remark').value})});
+    toast('Remarks saved');close();}catch(e){toast(e.message);}};
+}
+async function sendReport(sid){try{const r=await api('/api/admin/students/'+sid+'/send-report',{method:'POST'});toast(r.recipients?('📤 Report released to '+r.recipients+' recipient(s)'):'No parent/student contact on file — released to dashboard');render();}catch(e){toast(e.message);}}
+function loadDefaultTpl(){const t=document.getElementById('sc_tpl');if(t&&window.DEFAULT_REPORT_TEMPLATE){t.value=window.DEFAULT_REPORT_TEMPLATE;toast('Default template loaded — edit and Save');}}
+async function previewReport(){
+  // preview using the first student, if any
+  try{const {students}=await api('/api/admin/students');
+    if(!students||!students.length){toast('Add a student first to preview a report');return;}
+    const d=await api('/api/report/'+students[0].id);
+    if(window.printReportCard)printReportCard(d);else toast('Report module not loaded');
+  }catch(e){toast(e.message);}
+}
+
+(async()=>{if(await guard()){document.getElementById('app').classList.remove('hidden');loadStats();render();}})();
+</script>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});}</script>
+</body>
+</html>
