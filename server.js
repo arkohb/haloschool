@@ -322,6 +322,38 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ========================================================================
+    // DIAGNOSTIC ENDPOINT (Debug)
+    // ========================================================================
+
+    if (p === '/api/diagnostic') {
+      try {
+        const tables = db.prepare(`
+          SELECT name FROM sqlite_master 
+          WHERE type='table'
+        `).all();
+        
+        const schoolsCount = db.prepare('SELECT COUNT(*) as count FROM schools').get().count;
+        const usersCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+        
+        return json(res, 200, {
+          status: 'ok',
+          database_path: DATABASE_PATH,
+          tables: tables.map(t => t.name),
+          schools_count: schoolsCount,
+          users_count: usersCount,
+          timestamp: new Date().toISOString()
+        });
+      } catch (e) {
+        return json(res, 200, {
+          status: 'error',
+          database_path: DATABASE_PATH,
+          error: e.message,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    // ========================================================================
     // AUTHENTICATION ENDPOINTS
     // ========================================================================
 
