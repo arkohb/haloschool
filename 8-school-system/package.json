@@ -1,9 +1,26 @@
 {
-  "name": "haloschool-app",
-  "version": "1.0.0",
-  "type": "module",
-  "description": "HaloSchool — multi-tenant school management system (enrollment, attendance, grades, timetables, fees) with Paystack MoMo/card.",
-  "main": "server.js",
-  "scripts": { "start": "node server.js" },
-  "engines": { "node": ">=22.5.0" }
+  "name": "haloschool",
+  "version": "2.0.0",
+  "description": "HaloSchool - Multi-Tenant School Management System",
+  "main": "backend/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node backend/server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.0.0",
+    "jsonwebtoken": "^9.1.2",
+    "crypto": "builtin"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "keywords": [
+    "school",
+    "management",
+    "multi-tenant"
+  ],
+  "author": "Ant (Bismark Arko-Ofori)",
+  "license": "MIT"
 }

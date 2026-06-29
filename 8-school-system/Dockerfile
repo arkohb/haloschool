@@ -1,6 +1,22 @@
-# HaloSchool — Node 22 (built-in node:sqlite, no dependencies)
-FROM node:22-alpine
+FROM node:18-alpine
+
 WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies (including native modules)
+RUN npm ci --only=production
+
+# Copy application code
 COPY . .
-EXPOSE 3000
-CMD ["node", "server.js"]
+
+# Expose port
+EXPOSE 5000
+
+# Health check with correct path
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:5000/api/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+
+# Start application
+CMD ["npm", "start"]
