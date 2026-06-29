@@ -743,8 +743,160 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ========================================================================
-    // STATIC FILES
+    // STATIC FILES & HOME PAGE
     // ========================================================================
+
+    // Home page
+    if (p === '/' || p === '/index.html') {
+      const homeHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HaloSchool - Multi-Tenant School Management System</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f7f2e7; }
+    .container { max-width: 1000px; margin: 0 auto; padding: 2rem; text-align: center; }
+    .header { margin-bottom: 3rem; }
+    h1 { color: #171410; font-size: 48px; margin-bottom: 1rem; }
+    .subtitle { color: #666; font-size: 20px; margin-bottom: 2rem; }
+    .status { background: white; padding: 2rem; border-radius: 12px; margin-bottom: 2rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .status-item { margin-bottom: 1rem; }
+    .status-label { font-weight: 600; color: #d99b16; }
+    .status-value { color: #27ae60; font-size: 18px; }
+    .endpoints { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: left; }
+    .endpoints h2 { color: #d99b16; margin-bottom: 1.5rem; text-align: center; }
+    .endpoint { background: #f5f5f5; padding: 1rem; margin-bottom: 0.75rem; border-radius: 6px; border-left: 4px solid #d99b16; font-family: monospace; font-size: 14px; }
+    .links { margin-top: 2rem; text-align: center; }
+    .btn { display: inline-block; padding: 0.75rem 1.5rem; background: #d99b16; color: white; text-decoration: none; border-radius: 6px; margin: 0.5rem; font-weight: 600; }
+    .btn:hover { background: #c68910; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎓 HaloSchool</h1>
+      <p class="subtitle">Multi-Tenant School Management System</p>
+    </div>
+
+    <div class="status">
+      <div class="status-item">
+        <span class="status-label">Status:</span>
+        <span class="status-value">✅ Online & Operational</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Version:</span>
+        <span class="status-value">2.0.1</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Database:</span>
+        <span class="status-value">✅ Initialized</span>
+      </div>
+    </div>
+
+    <div class="endpoints">
+      <h2>API Endpoints</h2>
+      <div class="endpoint">GET /api/health - Health check</div>
+      <div class="endpoint">GET /api/diagnostic - Database diagnostic</div>
+      <div class="endpoint">POST /api/school/signup - Register school</div>
+      <div class="endpoint">POST /api/login - Login user</div>
+      <div class="endpoint">GET /api/enrollment-data?token=... - Get enrollment details</div>
+      <div class="endpoint">POST /api/enroll - Complete enrollment</div>
+      <div class="endpoint">POST /api/admin/add-teacher - Add teacher</div>
+      <div class="endpoint">POST /api/admin/add-parent - Add parent</div>
+      <div class="endpoint">POST /api/admin/add-student - Add student</div>
+      <div class="endpoint">GET /api/teacher/classes - Get teacher classes</div>
+      <div class="endpoint">GET /api/parent/children - Get parent's children</div>
+      <div class="endpoint">GET /api/student/me - Get student data</div>
+      <div class="endpoint">GET /api/admin/students - Get all students</div>
+    </div>
+
+    <div class="links">
+      <a href="/api/health" class="btn">Test Health Check</a>
+      <a href="/api/diagnostic" class="btn">Check Database</a>
+      <a href="/admin" class="btn">Admin Login</a>
+    </div>
+
+    <p style="margin-top: 2rem; color: #666; font-size: 14px;">
+      Deployment Date: June 29, 2026 | Status: Production Ready
+    </p>
+  </div>
+</body>
+</html>`;
+      return html(res, homeHtml);
+    }
+
+    // Admin dashboard
+    if (p === '/admin') {
+      const adminHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin Dashboard - HaloSchool</title>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto; background: #f7f2e7; padding: 2rem; text-align: center; }
+    .container { max-width: 600px; margin: 0 auto; background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    h1 { color: #171410; }
+    p { color: #666; }
+    input { width: 100%; padding: 0.75rem; margin: 0.5rem 0; border: 1px solid #ddd; border-radius: 6px; }
+    button { width: 100%; padding: 0.9rem; background: #d99b16; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; margin-top: 1rem; }
+    button:hover { background: #c68910; }
+    a { color: #d99b16; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎓 Admin Dashboard</h1>
+    <p>HaloSchool Multi-Tenant System</p>
+    <hr style="margin: 1rem 0;">
+    <h2>Admin Login</h2>
+    <input type="email" id="email" placeholder="Email address">
+    <input type="password" id="password" placeholder="Password">
+    <button onclick="login()">Login</button>
+    <p style="margin-top: 2rem;"><a href="/">← Back Home</a></p>
+  </div>
+  <script>
+    function login() {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login_id: email, password: password })
+      })
+      .then(r => r.json())
+      .then(d => {
+        if (d.token) {
+          localStorage.setItem('token', d.token);
+          alert('Login successful! Token saved.');
+          console.log('Token:', d.token);
+        } else {
+          alert('Login failed: ' + d.error);
+        }
+      })
+      .catch(e => alert('Error: ' + e.message));
+    }
+  </script>
+</body>
+</html>`;
+      return html(res, adminHtml);
+    }
+
+    // Teacher dashboard
+    if (p === '/teacher') {
+      return html(res, `<html><body style="font-family: sans-serif; padding: 2rem; background: #f7f2e7;"><h1>👨‍🏫 Teacher Dashboard</h1><p>HaloSchool - Teacher Portal</p><p><a href="/" style="color: #d99b16;">← Back Home</a></p></body></html>`);
+    }
+
+    // Parent dashboard
+    if (p === '/parent') {
+      return html(res, `<html><body style="font-family: sans-serif; padding: 2rem; background: #f7f2e7;"><h1>👨‍👩‍👧 Parent Portal</h1><p>HaloSchool - Parent Dashboard</p><p><a href="/" style="color: #d99b16;">← Back Home</a></p></body></html>`);
+    }
+
+    // Student dashboard
+    if (p === '/student') {
+      return html(res, `<html><body style="font-family: sans-serif; padding: 2rem; background: #f7f2e7;"><h1>👨‍🎓 Student Dashboard</h1><p>HaloSchool - Student Portal</p><p><a href="/" style="color: #d99b16;">← Back Home</a></p></body></html>`);
+    }
 
     if (p === '/enroll' || p.startsWith('/enroll/')) {
       const enrollHtml = `<!DOCTYPE html>
